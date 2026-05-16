@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import { GitProgressBar } from '../GitProgressBar'
@@ -88,6 +89,7 @@ function defaultMsgFor(
 }
 
 export function RebaseModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const { repoPath, showToast, gitProgress, refreshRepo } = useStore()
   const [depth, setDepth] = useState(10)
   const [rows, setRows] = useState<Row[]>([])
@@ -168,14 +170,14 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
   const executePlan = async () => {
     if (!repoPath) return
     if (!baseSha) {
-      showToast('找不到 rebase 起点（仓库历史不够长）', 'error')
+      showToast(t('rebase.err_no_start'), 'error')
       return
     }
     if (rows.length === 0) return
 
     const firstKeep = rows.find(r => r.action !== 'drop')
     if (firstKeep && firstKeep.action !== 'pick' && firstKeep.action !== 'reword') {
-      showToast('最前面的提交必须是"保留"或"改信息"', 'error')
+      showToast(t('rebase.err_first_must_pick'), 'error')
       return
     }
 
@@ -192,7 +194,7 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
         plan: rows.map(r => ({ sha: r.sha, action: r.action, message: r.message })),
         editorMessages: messages,
       })
-      showToast('rebase 完成', 'success')
+      showToast(t('rebase.success'), 'success')
       await refreshRepo()
       onClose()
     } catch (e) {
@@ -217,37 +219,37 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
     const sq     = rows.filter(r => r.action === 'squash').length
     const droppd = rows.filter(r => r.action === 'drop').length
     const parts: string[] = []
-    if (kept)   parts.push(`保留 ${kept}`)
-    if (reword) parts.push(`改信息 ${reword}`)
-    if (fixed)  parts.push(`合并 ${fixed}`)
-    if (sq)     parts.push(`合并并改信息 ${sq}`)
-    if (droppd) parts.push(`删除 ${droppd}`)
-    return parts.join(' · ') || '无变化'
+    if (kept)   parts.push(t('rebase.summary_kept',    { n: kept }))
+    if (reword) parts.push(t('rebase.summary_reword',  { n: reword }))
+    if (fixed)  parts.push(t('rebase.summary_fixup',   { n: fixed }))
+    if (sq)     parts.push(t('rebase.summary_squash',  { n: sq }))
+    if (droppd) parts.push(t('rebase.summary_dropped', { n: droppd }))
+    return parts.join(' · ') || t('rebase.summary_none')
   })()
 
   return (
     <div className="modal-overlay" onClick={running ? undefined : onClose}>
       <div className="modal rebase-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-title">
-          {step === 1 ? '整理提交' : `编辑提交说明 (${steps.length})`}
+          {step === 1 ? t('rebase.title_arrange') : t('rebase.title_edit_msgs', { n: steps.length })}
         </div>
         <div className="modal-body">
           {step === 1 ? (
             <>
               <p className="modal-warn">
                 <i className="ti ti-alert-triangle" />
-                整理会改写历史。已推送到远端的提交不要整理，否则会让协作者一头雾水。
+                {t('rebase.warn')}
               </p>
 
               <div className="rebase-controls">
                 <label className="rebase-depth">
-                  <span>范围</span>
+                  <span>{t('rebase.range_label')}</span>
                   <select
                     value={depth}
                     onChange={e => setDepth(Number(e.target.value))}
                     disabled={running}
                   >
-                    {DEPTH_OPTIONS.map(n => <option key={n} value={n}>最近 {n} 个</option>)}
+                    {DEPTH_OPTIONS.map(n => <option key={n} value={n}>{t('rebase.range_option', { n })}</option>)}
                   </select>
                 </label>
                 <span className="rebase-summary">{planSummary}</span>
@@ -255,11 +257,11 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
 
               {loading ? (
                 <div className="empty-state center" style={{ padding: 24 }}>
-                  <i className="ti ti-loader-2" /> <span style={{ marginLeft: 6 }}>加载提交…</span>
+                  <i className="ti ti-loader-2" /> <span style={{ marginLeft: 6 }}>{t('rebase.loading_commits')}</span>
                 </div>
               ) : rows.length === 0 ? (
                 <div className="empty-state center" style={{ padding: 24 }}>
-                  没有可整理的提交
+                  {t('rebase.no_commits_to_arrange')}
                 </div>
               ) : (
                 <div
@@ -308,7 +310,7 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
                       >
                         <span
                           className="rebase-drag-handle"
-                          title="拖动以重排"
+                          title={t('rebase.drag_to_reorder')}
                           draggable={!running}
                           onDragStart={e => {
                             e.dataTransfer.effectAllowed = 'move'
@@ -330,11 +332,11 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
                           onChange={e => setAction(idx, e.target.value as Action)}
                           disabled={running}
                         >
-                          <option value="pick">保留</option>
-                          <option value="reword">改信息</option>
-                          <option value="fixup" disabled={idx === 0}>合并到上方</option>
-                          <option value="squash" disabled={idx === 0}>合并并改信息</option>
-                          <option value="drop">删除</option>
+                          <option value="pick">{t('rebase.action_pick')}</option>
+                          <option value="reword">{t('rebase.action_reword')}</option>
+                          <option value="fixup" disabled={idx === 0}>{t('rebase.action_fixup')}</option>
+                          <option value="squash" disabled={idx === 0}>{t('rebase.action_squash')}</option>
+                          <option value="drop">{t('rebase.action_drop')}</option>
                         </select>
                         <span className="rebase-sha">{r.shortId}</span>
                         <span className="rebase-msg" title={r.message}>{r.message}</span>
@@ -347,11 +349,11 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
           ) : (
             <>
               <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-                这次整理有 {steps.length} 段说明需要编辑（按 git 写入顺序排列）。
+                {t('rebase.edit_step_intro', { n: steps.length })}
               </p>
               <div className="squash-msg-list">
                 {steps.map((s, i) => {
-                  const label  = s.kind === 'reword' ? '改信息' : '合并'
+                  const label  = s.kind === 'reword' ? t('rebase.step_reword') : t('rebase.step_squash')
                   const cls    = s.kind === 'reword' ? 'reword' : 'squash'
                   const current = editorMsgs[s.rowIdx] ?? defaultMsgFor(s.rowIdx, rows, editorMsgs)
                   return (
@@ -396,10 +398,10 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
               style={{ marginRight: 'auto' }}
             >
               <i className="ti ti-chevron-left" />
-              上一步
+              {t('rebase.btn_back')}
             </button>
           )}
-          <button className="btn-secondary" onClick={onClose} disabled={running}>取消</button>
+          <button className="btn-secondary" onClick={onClose} disabled={running}>{t('common.cancel')}</button>
           <button
             className="btn-primary"
             onClick={step === 1 ? onClickExecute : executePlan}
@@ -407,10 +409,10 @@ export function RebaseModal({ onClose }: { onClose: () => void }) {
           >
             <i className={`ti ${running ? 'ti-loader-2' : 'ti-stack-2'}`} />
             {running
-              ? '执行中…'
+              ? t('rebase.btn_running')
               : step === 1
-                ? (steps.length > 0 ? '下一步：编辑信息' : '执行 rebase')
-                : '执行 rebase'}
+                ? (steps.length > 0 ? t('rebase.btn_next_edit') : t('rebase.btn_run'))
+                : t('rebase.btn_run')}
           </button>
         </div>
       </div>
