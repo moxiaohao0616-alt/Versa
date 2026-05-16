@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore, type MergeAnalysis, type MergeRiskReport, type FileRisk } from '../../store'
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function MergeModal({ target, onClose }: Props) {
+  const { t } = useTranslation()
   const { repoStatus, analyzeMerge, aiAnalyzeMergeRisk, mergeBranch, showToast } = useStore()
   const [analysis, setAnalysis] = useState<MergeAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
@@ -86,14 +88,14 @@ export function MergeModal({ target, onClose }: Props) {
     <div className="modal-overlay" onClick={merging ? undefined : onClose}>
       <div className="modal merge-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-title">
-          合并 <span className="merge-branch-pill">{target}</span>
+          {t('merge.title_short')} <span className="merge-branch-pill">{target}</span>
           {' → '}
           <span className="merge-branch-pill current">{current}</span>
         </div>
         <div className="modal-body">
           {loading ? (
             <div className="empty-state center" style={{ padding: 20 }}>
-              <i className="ti ti-loader-2" /> <span style={{ marginLeft: 6 }}>分析合并范围…</span>
+              <i className="ti ti-loader-2" /> <span style={{ marginLeft: 6 }}>{t('merge.analyzing_range')}</span>
             </div>
           ) : error ? (
             <p className="modal-warn">
@@ -115,22 +117,22 @@ export function MergeModal({ target, onClose }: Props) {
             <div className="merge-ai-section">
               <div className="merge-ai-head">
                 <i className="ti ti-sparkles" />
-                <span>AI 风险分析</span>
+                <span>{t('merge.ai_risk_title')}</span>
                 {aiReport && !aiLoading && (
                   <button
                     className="commit-explain-redo"
                     onClick={handleAskAI}
-                    title="再问一次"
+                    title={t('merge.ai_redo_tooltip')}
                   >
                     <i className="ti ti-refresh" />
-                    重新分析
+                    {t('merge.ai_redo')}
                   </button>
                 )}
               </div>
               {aiLoading ? (
                 <div className="merge-ai-loading">
                   <i className="ti ti-loader-2" />
-                  <span>AI 正在分析两边的改动…</span>
+                  <span>{t('merge.ai_analyzing_both')}</span>
                 </div>
               ) : aiReport ? (
                 <p className="merge-ai-text">{aiReport.overall}</p>
@@ -139,17 +141,17 @@ export function MergeModal({ target, onClose }: Props) {
                   className="commit-explain-btn"
                   onClick={handleAskAI}
                   style={{ marginTop: 4 }}
-                  title="发送两边的 diff 让 AI 找出冲突隐患"
+                  title={t('merge.ai_run_tooltip')}
                 >
                   <i className="ti ti-sparkles" />
-                  用 AI 分析合并风险
+                  {t('merge.ai_run')}
                 </button>
               )}
             </div>
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose} disabled={merging}>取消</button>
+          <button className="btn-secondary" onClick={onClose} disabled={merging}>{t('common.cancel')}</button>
           <button
             className="btn-primary"
             disabled={
@@ -158,25 +160,19 @@ export function MergeModal({ target, onClose }: Props) {
             }
             onClick={handleMerge}
             title={
-              analysis?.alreadyMerged ? '已经合并过了，不用再合'
-                : analysis && analysis.canFastForward ? '快进合并（无冲突）'
-                : '执行合并'
+              analysis?.alreadyMerged ? t('merge.already_merged')
+                : analysis && analysis.canFastForward ? t('merge.ff_merge')
+                : t('merge.do_merge')
             }
           >
             <i className={`ti ${merging ? 'ti-loader-2' : 'ti-git-merge'}`} />
-            {merging ? '合并中…'
-              : (analysis?.canFastForward ? '快进合并' : '确认合并')}
+            {merging ? t('merge.merging')
+              : (analysis?.canFastForward ? t('merge.ff_merge_btn') : t('merge.confirm_merge'))}
           </button>
         </div>
       </div>
     </div>
   )
-}
-
-const RISK_LABEL: Record<FileRisk['risk'], string> = {
-  high:   '高风险',
-  medium: '中等风险',
-  low:    '低风险',
 }
 
 function AnalysisContent({
@@ -190,19 +186,23 @@ function AnalysisContent({
   fileLoadingFor: string | null
   onToggleFile: (file: string) => void
 }) {
+  const { t } = useTranslation()
+  const riskLabel = (r: FileRisk['risk']) =>
+    r === 'high' ? t('merge.high_risk') : r === 'medium' ? t('merge.medium_risk') : t('merge.low_risk')
+
   if (analysis.alreadyMerged) {
     return (
       <p style={{ fontSize: 13 }}>
         <i className="ti ti-circle-check" style={{ color: 'var(--green)' }} />
         {' '}
-        <strong>{analysis.target}</strong> 已经合并到 <strong>{analysis.current}</strong>，不用再合一次。
+        {t('merge.already_merged_long', { target: analysis.target, current: analysis.current })}
       </p>
     )
   }
   if (analysis.targetCommits === 0) {
     return (
       <p style={{ fontSize: 13 }}>
-        <strong>{analysis.target}</strong> 没有新的提交可合并进来。
+        {t('merge.no_commits', { target: analysis.target })}
       </p>
     )
   }
@@ -212,15 +212,18 @@ function AnalysisContent({
         {analysis.canFastForward ? (
           <>
             <i className="ti ti-arrow-right" style={{ color: 'var(--green)' }} />
-            {' '}<strong>快进合并</strong>：
-            把 <strong>{analysis.current}</strong> 直接前进到 <strong>{analysis.target}</strong>
-            （{analysis.targetCommits} 个提交，没有任何冲突可能）。
+            {' '}{t('merge.ff_explain', {
+              current: analysis.current,
+              target: analysis.target,
+              n: analysis.targetCommits,
+            })}
           </>
         ) : (
-          <>
-            <strong>{analysis.target}</strong> 有 {analysis.targetCommits} 个新提交，
-            会动到 {analysis.incomingFiles.length} 个文件。
-          </>
+          t('merge.will_merge', {
+            target: analysis.target,
+            n: analysis.targetCommits,
+            f: analysis.incomingFiles.length,
+          })
         )}
       </p>
 
@@ -228,10 +231,10 @@ function AnalysisContent({
         <div className="merge-shared">
           <div className="merge-shared-head">
             <i className="ti ti-alert-triangle" />
-            <span>{analysis.sharedFiles.length} 个文件双方都改了</span>
+            <span>{t('merge.both_changed', { n: analysis.sharedFiles.length })}</span>
             {riskMap.size > 0 && (
               <span className="merge-shared-legend">
-                AI 已染色
+                {t('merge.ai_colored')}
               </span>
             )}
           </div>
@@ -246,13 +249,13 @@ function AnalysisContent({
                   <div
                     className={`merge-shared-item clickable ${r ? `risk-${r.risk}` : 'risk-unknown'} ${isExpanded ? 'expanded' : ''}`}
                     onClick={() => onToggleFile(p)}
-                    title="点击 — 让 AI 深入分析这个文件的冲突点"
+                    title={t('merge.ai_file_deep')}
                   >
                     <span className="risk-dot" aria-hidden />
                     <code className="merge-shared-path">{p}</code>
                     {r ? (
                       <>
-                        <span className="risk-label">{RISK_LABEL[r.risk]}</span>
+                        <span className="risk-label">{riskLabel(r.risk)}</span>
                         <span className="risk-reason" title={r.reason}>{r.reason}</span>
                       </>
                     ) : null}
@@ -268,7 +271,7 @@ function AnalysisContent({
                       ) : isLoading ? (
                         <div className="merge-ai-loading">
                           <i className="ti ti-loader-2" />
-                          <span>AI 正在分析 {p} 的冲突…</span>
+                          <span>{t('merge.ai_file_analyzing', { file: p })}</span>
                         </div>
                       ) : null}
                     </div>
@@ -279,7 +282,7 @@ function AnalysisContent({
             {analysis.sharedFiles.length > 12 && (
               <li className="merge-shared-item" style={{ opacity: 0.5 }}>
                 <span className="risk-dot" />
-                <code>… 还有 {analysis.sharedFiles.length - 12} 个</code>
+                <code>{t('merge.more_files', { n: analysis.sharedFiles.length - 12 })}</code>
               </li>
             )}
           </ul>
@@ -289,7 +292,7 @@ function AnalysisContent({
       {!analysis.canFastForward && analysis.sharedFiles.length === 0 && (
         <p className="merge-summary" style={{ color: 'var(--green)' }}>
           <i className="ti ti-circle-check" />
-          {' '}双方改动的文件不重叠，结构上应该可以自动合并。
+          {' '}{t('merge.disjoint')}
         </p>
       )}
     </>

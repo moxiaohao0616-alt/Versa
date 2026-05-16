@@ -475,7 +475,7 @@ function TagsSection({ filter }: { filter: string }) {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">删除标签 {confirmDelete.name}？</div>
+            <div className="modal-title">{t('branches.delete_local_tag')} {confirmDelete.name}</div>
             <div className="modal-body">
               <p className="modal-warn">
                 <i className="ti ti-alert-triangle" />
@@ -483,7 +483,7 @@ function TagsSection({ filter }: { filter: string }) {
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-danger"
                 onClick={async () => {
@@ -506,14 +506,15 @@ function TagsSection({ filter }: { filter: string }) {
 
 // ── Submodules section ─────────────────────────────────────────────────
 
-function submoduleStatusBadge(s: SubmoduleInfo): { label: string; tone: 'ok' | 'warn' | 'info' | 'off' } {
-  if (!s.inWorkdir) return { label: '未初始化', tone: 'off' }
-  if (s.workdirModified) return { label: '有未提交改动', tone: 'warn' }
-  if (s.indexOutOfSync || s.workdirOutOfSync) return { label: '与父记录不一致', tone: 'info' }
-  return { label: '已更新', tone: 'ok' }
+function submoduleStatusBadge(s: SubmoduleInfo, t: (k: string) => string): { label: string; tone: 'ok' | 'warn' | 'info' | 'off' } {
+  if (!s.inWorkdir)                                 return { label: t('branches.submodule_status_notInit'),    tone: 'off'  }
+  if (s.workdirModified)                            return { label: t('branches.submodule_status_modified'),   tone: 'warn' }
+  if (s.indexOutOfSync || s.workdirOutOfSync)       return { label: t('branches.submodule_status_outOfSync'),  tone: 'info' }
+  return { label: t('branches.submodule_status_clean'), tone: 'ok' }
 }
 
 function SubmodulesSection({ filter }: { filter: string }) {
+  const { t } = useTranslation()
   const {
     listSubmodules, addSubmodule, initSubmodule, updateSubmodule,
     syncSubmodule, deinitSubmodule, removeSubmodule, repoPath, showToast,
@@ -571,18 +572,18 @@ function SubmodulesSection({ filter }: { filter: string }) {
   return (
     <section className="branches-section">
       <h3 className="branches-section-title">
-        子模块 · {filtered.length}
-        <button className="branches-add-btn" onClick={() => setAddOpen(true)} title="添加子模块">
+        {t('branches.title_submodules')} · {filtered.length}
+        <button className="branches-add-btn" onClick={() => setAddOpen(true)} title={t('branches.add_submodule_title')}>
           <i className="ti ti-plus" />
         </button>
       </h3>
 
       {filtered.length === 0 ? (
-        <div className="branches-empty">{subs.length === 0 ? '这个仓库没有子模块' : '没有匹配的子模块'}</div>
+        <div className="branches-empty">{subs.length === 0 ? t('branches.empty_no_subs') : t('branches.empty_no_match_subs')}</div>
       ) : (
         <div className="branches-list">
           {filtered.map(s => {
-            const badge = submoduleStatusBadge(s)
+            const badge = submoduleStatusBadge(s, t)
             return (
               <div key={s.name} className="branch-row" title={s.url}>
                 <i className="ti ti-package branch-icon" />
@@ -599,7 +600,7 @@ function SubmodulesSection({ filter }: { filter: string }) {
                     <button
                       className="commit-actions-btn"
                       onClick={() => setMenuFor(menuFor === s.name ? null : s.name)}
-                      title="子模块操作"
+                      title={t('cheatsheet.kebab_desc')}
                     >
                       <i className="ti ti-dots-vertical" />
                     </button>
@@ -614,7 +615,7 @@ function SubmodulesSection({ filter }: { filter: string }) {
                             }}
                           >
                             <i className="ti ti-download" />
-                            <span>初始化并拉取</span>
+                            <span>{t('branches.submodule_init')}</span>
                           </button>
                         ) : (
                           <button
@@ -625,7 +626,7 @@ function SubmodulesSection({ filter }: { filter: string }) {
                             }}
                           >
                             <i className="ti ti-refresh" />
-                            <span>对齐到父记录</span>
+                            <span>{t('branches.submodule_update')}</span>
                           </button>
                         )}
                         <button
@@ -636,7 +637,7 @@ function SubmodulesSection({ filter }: { filter: string }) {
                           }}
                         >
                           <i className="ti ti-link" />
-                          <span>同步 URL</span>
+                          <span>{t('branches.submodule_sync')}</span>
                         </button>
                         {s.inWorkdir && (
                           <button
@@ -647,12 +648,12 @@ function SubmodulesSection({ filter }: { filter: string }) {
                             }}
                           >
                             <i className="ti ti-eraser" />
-                            <span>清空工作区（deinit）</span>
+                            <span>{t('branches.submodule_deinit')}</span>
                           </button>
                         )}
                         <button onClick={() => { setMenuFor(null); setRemoveTarget(s) }}>
                           <i className="ti ti-trash" />
-                          <span>彻底移除</span>
+                          <span>{t('branches.submodule_remove')}</span>
                         </button>
                       </div>
                     )}
@@ -667,28 +668,28 @@ function SubmodulesSection({ filter }: { filter: string }) {
       {addOpen && (
         <div className="modal-overlay" onClick={() => setAddOpen(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">添加子模块</div>
+            <div className="modal-title">{t('branches.add_submodule_title')}</div>
             <div className="modal-body">
               <p className="settings-row-desc" style={{ marginBottom: 8 }}>
                 等同 <code>git submodule add &lt;url&gt; &lt;path&gt;</code>。
               </p>
               <input
                 className="settings-input"
-                placeholder="子模块仓库 URL"
+                placeholder={t('branches.submodule_url_placeholder')}
                 value={newUrl}
                 onChange={e => setNewUrl(e.target.value)}
                 autoFocus
               />
               <input
                 className="settings-input"
-                placeholder="检出到的相对路径（如 vendor/foo）"
+                placeholder={t('branches.submodule_path_placeholder')}
                 value={newPath}
                 onChange={e => setNewPath(e.target.value)}
                 style={{ marginTop: 8 }}
               />
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setAddOpen(false)}>取消</button>
+              <button className="btn-secondary" onClick={() => setAddOpen(false)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 disabled={!newUrl.trim() || !newPath.trim()}
@@ -714,7 +715,7 @@ function SubmodulesSection({ filter }: { filter: string }) {
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setRemoveTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setRemoveTarget(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-danger"
                 onClick={async () => {
