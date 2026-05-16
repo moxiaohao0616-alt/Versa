@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
 
 export function BisectBanner() {
+  const { t } = useTranslation()
   const {
     bisectStatus, loadBisectStatus, bisectMark, bisectReset, repoStatus,
     selectCommit, setTab,
@@ -44,9 +46,9 @@ export function BisectBanner() {
         <div className="bisect-banner-left">
           <i className="ti ti-target" />
           <div className="bisect-banner-text">
-            <span className="bisect-banner-title">找到了！</span>
+            <span className="bisect-banner-title">{t('bisect.found_title')}</span>
             <span className="bisect-banner-meta">
-              第一个出问题的提交是
+              {t('bisect.found_meta')}
               {' '}<code className="bisect-sha">{bisectStatus.foundShort ?? '?'}</code>
               {bisectStatus.foundSubject ? ` · ${bisectStatus.foundSubject}` : ''}
             </span>
@@ -55,7 +57,7 @@ export function BisectBanner() {
         <div className="bisect-banner-actions">
           <button className="btn-primary" onClick={onReset} disabled={busy !== null}>
             <i className={`ti ${busy === 'reset' ? 'ti-loader-2' : 'ti-check'}`} />
-            完成 · 退出查找
+            {t('bisect.finish_exit')}
           </button>
         </div>
       </div>
@@ -68,13 +70,13 @@ export function BisectBanner() {
       <div className="bisect-banner-left">
         <i className="ti ti-search" />
         <div className="bisect-banner-text">
-          <span className="bisect-banner-title">正在查找出问题的提交</span>
+          <span className="bisect-banner-title">{t('bisect.in_progress_title')}</span>
           <span className="bisect-banner-meta">
-            正在测试
+            {t('bisect.in_progress_meta')}
             {' '}<code className="bisect-sha">{bisectStatus.currentShort ?? '?'}</code>
             {bisectStatus.currentSubject ? ` · ${bisectStatus.currentSubject}` : ''}
             {bisectStatus.stepsRemaining != null &&
-              ` · 还需 ~${bisectStatus.stepsRemaining} 步`}
+              ` · ${t('bisect.steps_remaining', { n: bisectStatus.stepsRemaining })}`}
           </span>
         </div>
       </div>
@@ -83,46 +85,46 @@ export function BisectBanner() {
           className="ct-btn"
           onClick={viewCurrent}
           disabled={busy !== null || !bisectStatus.currentOid}
-          title="看看这版改了什么（跳到 commit-view 显示这次的 diff）"
+          title={t('bisect.view_current_tooltip')}
         >
           <i className="ti ti-file-search" />
-          看看这版改了什么
+          {t('bisect.view_current_diff')}
         </button>
         <button
           className="ct-btn good"
           onClick={() => onMark('good')}
           disabled={busy !== null}
-          title="这一版能正常用"
+          title={t('bisect.good_tooltip')}
         >
           <i className={`ti ${busy === 'good' ? 'ti-loader-2' : 'ti-thumb-up'}`} />
-          这版好
+          {t('bisect.good')}
         </button>
         <button
           className="ct-btn bad"
           onClick={() => onMark('bad')}
           disabled={busy !== null}
-          title="这一版已经有问题了"
+          title={t('bisect.bad_tooltip')}
         >
           <i className={`ti ${busy === 'bad' ? 'ti-loader-2' : 'ti-thumb-down'}`} />
-          这版坏
+          {t('bisect.bad')}
         </button>
         <button
           className="ct-btn"
           onClick={() => onMark('skip')}
           disabled={busy !== null}
-          title="跳过这版（这次说不准，让 git 选别的）"
+          title={t('bisect.skip_tooltip')}
         >
           <i className={`ti ${busy === 'skip' ? 'ti-loader-2' : 'ti-player-skip-forward'}`} />
-          跳过
+          {t('bisect.skip')}
         </button>
         <button
           className="btn-secondary"
           onClick={onReset}
           disabled={busy !== null}
-          title="放弃这次查找，回到原来的分支"
+          title={t('bisect.stop_tooltip')}
         >
           <i className="ti ti-x" />
-          停止查找
+          {t('bisect.stop')}
         </button>
       </div>
     </div>

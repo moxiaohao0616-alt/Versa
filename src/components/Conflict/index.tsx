@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
 
 type Choice = 'ours' | 'theirs' | 'both-ours-first' | 'both-theirs-first' | 'none' | null
@@ -166,46 +167,49 @@ interface ModeLabels {
   needsMsg: boolean
 }
 
-const MODE_LABELS: Record<ConflictMode, ModeLabels> = {
-  'merging': {
-    title: '合并冲突',
-    abort: '放弃合并',
-    continue: '完成合并',
-    banner: '所有冲突已解决，可以完成合并',
-    abortDesc: '所有未解决的冲突和已采纳的选择都会被丢弃，工作区回到合并前的状态。',
-    continueDesc: '给这次合并写一段说明：',
-    needsMsg: true,
-  },
-  'rebasing': {
-    title: 'Rebase 中有冲突',
-    abort: '放弃 rebase',
-    continue: '继续 rebase',
-    banner: '所有冲突已解决，可以继续 rebase',
-    abortDesc: '所有未解决的冲突和已应用的提交都会被回滚，分支回到 rebase 前的状态。',
-    continueDesc: '应用这段已解决的冲突，然后继续后面的提交。如果接下来还有冲突，会再次停在这里。',
-    needsMsg: false,
-  },
-  'reverting': {
-    title: '撤销中有冲突',
-    abort: '放弃撤销',
-    continue: '继续撤销',
-    banner: '所有冲突已解决，可以完成撤销',
-    abortDesc: '撤销过程的所有改动会被丢弃，工作区回到撤销前的状态。',
-    continueDesc: '应用这段已解决的冲突，完成这次撤销提交。',
-    needsMsg: false,
-  },
-  'cherry-picking': {
-    title: '拣选中有冲突',
-    abort: '放弃拣选',
-    continue: '继续拣选',
-    banner: '所有冲突已解决，可以完成拣选',
-    abortDesc: '拣选过程的所有改动会被丢弃，工作区回到拣选前的状态。',
-    continueDesc: '应用这段已解决的冲突，完成这次拣选提交。',
-    needsMsg: false,
-  },
+function buildModeLabels(t: (k: string) => string): Record<ConflictMode, ModeLabels> {
+  return {
+    'merging': {
+      title: t('conflict.merge_title'),
+      abort: t('conflict.merge_abort'),
+      continue: t('conflict.merge_continue'),
+      banner: t('conflict.merge_banner'),
+      abortDesc: t('conflict.merge_abort_desc'),
+      continueDesc: t('conflict.merge_continue_desc'),
+      needsMsg: true,
+    },
+    'rebasing': {
+      title: t('conflict.rebase_title'),
+      abort: t('conflict.rebase_abort'),
+      continue: t('conflict.rebase_continue'),
+      banner: t('conflict.rebase_banner'),
+      abortDesc: t('conflict.rebase_abort_desc'),
+      continueDesc: t('conflict.rebase_continue_desc'),
+      needsMsg: false,
+    },
+    'reverting': {
+      title: t('conflict.revert_title'),
+      abort: t('conflict.revert_abort'),
+      continue: t('conflict.revert_continue'),
+      banner: t('conflict.revert_banner'),
+      abortDesc: t('conflict.revert_abort_desc'),
+      continueDesc: t('conflict.revert_continue_desc'),
+      needsMsg: false,
+    },
+    'cherry-picking': {
+      title: t('conflict.cherrypick_title'),
+      abort: t('conflict.cherrypick_abort'),
+      continue: t('conflict.cherrypick_continue'),
+      banner: t('conflict.cherrypick_banner'),
+      abortDesc: t('conflict.cherrypick_abort_desc'),
+      continueDesc: t('conflict.cherrypick_continue_desc'),
+      needsMsg: false,
+    },
+  }
 }
 
 export function ConflictView() {
+  const { t } = useTranslation()
   const {
     repoStatus,
     conflicts,
@@ -224,8 +228,9 @@ export function ConflictView() {
     clearConflictSuggestion,
   } = useStore()
 
+  const modeLabels = useMemo(() => buildModeLabels(t), [t])
   const mode = (repoStatus?.state as ConflictMode | undefined) ?? 'merging'
-  const labels = MODE_LABELS[mode] ?? MODE_LABELS.merging
+  const labels = modeLabels[mode] ?? modeLabels.merging
 
   const [abortModal, setAbortModal] = useState(false)
   const [continueModal, setContinueModal] = useState(false)
@@ -375,7 +380,7 @@ export function ConflictView() {
             <span className="conflict-banner-title">{labels.title}</span>
             <span className="conflict-banner-meta">
               {pendingCount > 0
-                ? `还有 ${pendingCount} 个文件待解决`
+                ? t('conflict.pending_count', { n: pendingCount })
                 : labels.banner}
             </span>
           </div>
@@ -389,7 +394,7 @@ export function ConflictView() {
             className="btn-primary"
             disabled={!allFilesResolved}
             onClick={() => setContinueModal(true)}
-            title={allFilesResolved ? labels.continue : '还有冲突未解决'}
+            title={allFilesResolved ? labels.continue : t('conflict.pending_unresolved')}
           >
             <i className="ti ti-check" />
             {labels.continue}
@@ -400,11 +405,11 @@ export function ConflictView() {
       <div className="conflict-body">
         {/* Left: file rail */}
         <aside className="conflict-files">
-          <div className="section-label">冲突文件</div>
+          <div className="section-label">{t('conflict.section_files')}</div>
           {conflicts.length === 0 ? (
             <div className="empty-state center" style={{ padding: 16 }}>
               <i className="ti ti-circle-check" style={{ fontSize: 28, opacity: 0.2 }} />
-              <p style={{ fontSize: 13 }}>所有冲突已解决</p>
+              <p style={{ fontSize: 13 }}>{t('conflict.all_resolved')}</p>
             </div>
           ) : (
             conflicts.map(c => (
@@ -420,7 +425,7 @@ export function ConflictView() {
                   <span className="conflict-file-path">{c.path.split('/').slice(0, -1).join('/')}</span>
                 </div>
                 {c.isBinary
-                  ? <span className="conflict-file-binary">二进制</span>
+                  ? <span className="conflict-file-binary">{t('conflict.binary_short')}</span>
                   : <span className="conflict-file-count">{c.hunkCount}</span>
                 }
               </button>
@@ -433,20 +438,23 @@ export function ConflictView() {
           {!selectedConflictFile || !conflictContent ? (
             <div className="empty-state center">
               <i className="ti ti-git-merge" style={{ fontSize: 40, opacity: 0.2 }} />
-              <p>选择左侧文件开始解决冲突</p>
+              <p>{t('conflict.pick_a_file')}</p>
             </div>
           ) : (
             <>
               <div className="conflict-toolbar">
                 <div className="conflict-toolbar-left">
-                  <button className="ct-btn" onClick={goPrev} title="上一处" disabled={conflictContent.hunks.length === 0}>
+                  <button className="ct-btn" onClick={goPrev} title={t('conflict.prev')} disabled={conflictContent.hunks.length === 0}>
                     <i className="ti ti-chevron-up" />
                   </button>
                   <span className="conflict-toolbar-pos">
-                    第 {conflictContent.hunks.length > 0 ? currentHunk + 1 : 0} / {conflictContent.hunks.length} 处
-                    <span className="conflict-toolbar-decided"> · 已决定 {decidedCount}</span>
+                    {t('conflict.nth_of_total', {
+                      n: conflictContent.hunks.length > 0 ? currentHunk + 1 : 0,
+                      total: conflictContent.hunks.length,
+                    })}
+                    <span className="conflict-toolbar-decided"> · {t('conflict.decided', { n: decidedCount })}</span>
                   </span>
-                  <button className="ct-btn" onClick={goNext} title="下一处" disabled={conflictContent.hunks.length === 0}>
+                  <button className="ct-btn" onClick={goNext} title={t('conflict.next')} disabled={conflictContent.hunks.length === 0}>
                     <i className="ti ti-chevron-down" />
                   </button>
                 </div>
@@ -456,27 +464,27 @@ export function ConflictView() {
                     onClick={() => setChoice(currentHunk, 'ours')}
                     disabled={conflictContent.hunks.length === 0}
                     data-picked={choices[currentHunk] === 'ours'}>
-                    用我的
+                    {t('conflict.use_ours')}
                   </button>
                   <button className="ct-choice theirs"
                     onClick={() => setChoice(currentHunk, 'theirs')}
                     disabled={conflictContent.hunks.length === 0}
                     data-picked={choices[currentHunk] === 'theirs'}>
-                    用对方的
+                    {t('conflict.use_theirs')}
                   </button>
                   <button className="ct-choice"
                     onClick={() => setChoice(currentHunk, 'both-ours-first')}
                     disabled={conflictContent.hunks.length === 0}
                     data-picked={choices[currentHunk] === 'both-ours-first'}
-                    title="先我的，再对方的">
-                    都要
+                    title={t('conflict.use_both_tooltip')}>
+                    {t('conflict.use_both')}
                   </button>
                   <button className="ct-choice"
                     onClick={() => setChoice(currentHunk, 'none')}
                     disabled={conflictContent.hunks.length === 0}
                     data-picked={choices[currentHunk] === 'none'}
-                    title="两边都不要，整段删除">
-                    都不要
+                    title={t('conflict.use_neither_tooltip')}>
+                    {t('conflict.use_neither')}
                   </button>
                 </div>
 
@@ -485,25 +493,25 @@ export function ConflictView() {
                     className="ct-btn ai"
                     onClick={() => requestConflictSuggestion(currentHunk)}
                     disabled={aiConflictLoading || conflictContent.hunks.length === 0}
-                    title="让 AI 分析这段冲突并给建议"
+                    title={t('conflict.ai_help_tooltip')}
                   >
                     <i className={`ti ${aiConflictLoading ? 'ti-loader-2' : 'ti-sparkles'}`} />
-                    {aiConflictLoading ? '分析中…' : 'AI 建议'}
+                    {aiConflictLoading ? t('conflict.ai_analyzing') : t('conflict.ai_btn')}
                   </button>
                   <button
                     className="ct-btn ghost"
                     onClick={() => setShowPreview(v => !v)}
-                    title="切换合并结果预览"
+                    title={t('conflict.preview_tooltip')}
                   >
                     <i className={`ti ${showPreview ? 'ti-eye-off' : 'ti-eye'}`} />
-                    预览
+                    {t('conflict.preview')}
                   </button>
                   <button className="btn-primary"
                     onClick={handleSaveFile}
                     disabled={!canSaveFile}
-                    title={canSaveFile ? '保存为已解决' : '所有冲突段都要先决定'}>
+                    title={canSaveFile ? t('conflict.mark_resolved_tooltip_ok') : t('conflict.mark_resolved_tooltip_pending')}>
                     <i className="ti ti-device-floppy" />
-                    标记为已解决
+                    {t('conflict.mark_resolved')}
                   </button>
                 </div>
               </div>
@@ -514,10 +522,10 @@ export function ConflictView() {
                     <i className="ti ti-sparkles" />
                     <div>
                       <div className="ai-suggestion-title">
-                        AI 推荐：{
-                          aiConflictSuggestion.recommendation === 'ours' ? '用我的'
-                          : aiConflictSuggestion.recommendation === 'theirs' ? '用对方的'
-                          : '两边都要'
+                        {t('conflict.ai_recommends')}{
+                          aiConflictSuggestion.recommendation === 'ours' ? t('conflict.use_ours')
+                          : aiConflictSuggestion.recommendation === 'theirs' ? t('conflict.use_theirs')
+                          : t('conflict.use_both')
                         }
                       </div>
                       <div className="ai-suggestion-reason">{aiConflictSuggestion.reasoning}</div>
@@ -527,10 +535,10 @@ export function ConflictView() {
                     <button
                       className="ct-btn"
                       onClick={clearConflictSuggestion}
-                      title="忽略"
+                      title={t('conflict.dismiss')}
                     >
                       <i className="ti ti-x" />
-                      忽略
+                      {t('conflict.dismiss')}
                     </button>
                     <button
                       className="btn-primary"
@@ -544,7 +552,7 @@ export function ConflictView() {
                       }}
                     >
                       <i className="ti ti-check" />
-                      采纳
+                      {t('conflict.accept')}
                     </button>
                   </div>
                 </div>
@@ -553,7 +561,7 @@ export function ConflictView() {
               <div className="conflict-columns">
                 <Column
                   side="ours"
-                  title="我的改动 (HEAD)"
+                  title={t('conflict.ours_label')}
                   text={conflictContent.ours}
                   ranges={oursRanges}
                   currentHunk={currentHunk}
@@ -561,15 +569,15 @@ export function ConflictView() {
                 />
                 <Column
                   side="base"
-                  title="原始版本 (共同祖先)"
-                  text={conflictContent.base ?? '(没有共同祖先)'}
+                  title={t('conflict.base_label')}
+                  text={conflictContent.base ?? t('common.none')}
                   ranges={baseRanges}
                   currentHunk={-1}
                   onClickHunk={() => {}}
                 />
                 <Column
                   side="theirs"
-                  title="对方改动 (MERGE_HEAD)"
+                  title={t('conflict.theirs_label')}
                   text={conflictContent.theirs}
                   ranges={theirsRanges}
                   currentHunk={currentHunk}
@@ -580,9 +588,9 @@ export function ConflictView() {
               {showPreview && (
                 <div className="conflict-preview">
                   <div className="conflict-preview-title">
-                    <i className="ti ti-file-check" /> 合并结果预览
+                    <i className="ti ti-file-check" /> {t('conflict.preview')}
                     {!allHunksDecided && (
-                      <span className="conflict-preview-warn"> · 仍含未决定的冲突段</span>
+                      <span className="conflict-preview-warn"> · {t('conflict.pending_unresolved')}</span>
                     )}
                   </div>
                   <pre className="conflict-preview-body">{mergedContent}</pre>
@@ -605,8 +613,8 @@ export function ConflictView() {
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setAbortModal(false)}>取消</button>
-              <button className="btn-primary" onClick={handleAbort}>确认放弃</button>
+              <button className="btn-secondary" onClick={() => setAbortModal(false)}>{t('common.cancel')}</button>
+              <button className="btn-primary" onClick={handleAbort}>{labels.abort}</button>
             </div>
           </div>
         </div>
@@ -635,10 +643,10 @@ export function ConflictView() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setContinueModal(false)}>取消</button>
+              <button className="btn-secondary" onClick={() => setContinueModal(false)}>{t('common.cancel')}</button>
               <button className="btn-primary" onClick={handleContinue}>
                 <i className="ti ti-check" />
-                {labels.needsMsg ? '提交合并' : '继续'}
+                {labels.continue}
               </button>
             </div>
           </div>

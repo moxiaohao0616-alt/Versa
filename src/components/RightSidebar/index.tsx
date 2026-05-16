@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
+import { relTime } from '../../lib/relTime'
 
 /** Right-side aux panel. Hosts "look at" cards: project runners, AI commit
  *  explanation, stash list. Each card collapses individually; the whole panel
  *  is toggled from the icon-bar. */
 export function RightSidebar() {
+  const { t } = useTranslation()
   const {
     projectInfo, sendToTerminal,
     selectedCommit, commitExplanation, commitExplanationLoading, explainSelectedCommit,
@@ -25,12 +28,12 @@ export function RightSidebar() {
   return (
     <aside className="right-sidebar">
       <div className="rs-header">
-        <span className="rs-header-title">侧栏</span>
+        <span className="rs-header-title">{t('rightsidebar.title')}</span>
         <button
           className="rs-collapse-btn"
           onClick={toggleRightSidebar}
-          title="收起侧栏"
-          aria-label="收起侧栏"
+          title={t('rightsidebar.collapse')}
+          aria-label={t('rightsidebar.collapse')}
         >
           <i className="ti ti-chevron-right" />
         </button>
@@ -60,7 +63,7 @@ export function RightSidebar() {
                 ))}
               </div>
             ) : (
-              <p className="rs-empty">这个项目没探测到可运行的脚本</p>
+              <p className="rs-empty">{t('rightsidebar.project_empty')}</p>
             )}
           </Card>
         )}
@@ -69,7 +72,7 @@ export function RightSidebar() {
         {selectedCommit && (
           <Card
             icon="ti-sparkles"
-            title={`AI 解释 · ${selectedCommit.shortId}`}
+            title={`${t('rightsidebar.explain_title')} · ${selectedCommit.shortId}`}
             open={openExplain}
             onToggle={() => setOpenExplain(v => !v)}
           >
@@ -86,12 +89,12 @@ export function RightSidebar() {
         {/* ── Stash list ───────────────────────────────────────────────── */}
         <Card
           icon="ti-archive"
-          title={`暂存 · ${stashes.length}`}
+          title={`${t('stash.title')} · ${stashes.length}`}
           open={openStash}
           onToggle={() => setOpenStash(v => !v)}
         >
           {stashes.length === 0 ? (
-            <p className="rs-empty">还没有搁置的进度</p>
+            <p className="rs-empty">{t('rightsidebar.stash_empty')}</p>
           ) : (
             <ul className="rs-stash-list">
               {stashes.map(s => (
@@ -105,24 +108,24 @@ export function RightSidebar() {
                       <>
                         <button
                           className="danger"
-                          title="确认删除（不可撤销）"
+                          title={t('rightsidebar.drop_confirm')}
                           onClick={() => { setConfirmDrop(null); dropStash(s.index) }}
                         >
                           <i className="ti ti-check" />
                         </button>
-                        <button title="取消" onClick={() => setConfirmDrop(null)}>
+                        <button title={t('common.cancel')} onClick={() => setConfirmDrop(null)}>
                           <i className="ti ti-x" />
                         </button>
                       </>
                     ) : (
                       <>
-                        <button title="恢复（保留搁置）" onClick={() => applyStash(s.index)}>
+                        <button title={t('rightsidebar.apply_keep')} onClick={() => applyStash(s.index)}>
                           <i className="ti ti-arrow-back-up" />
                         </button>
-                        <button title="恢复并从列表删除" onClick={() => popStash(s.index)}>
+                        <button title={t('rightsidebar.apply_drop')} onClick={() => popStash(s.index)}>
                           <i className="ti ti-arrow-back-up-double" />
                         </button>
-                        <button title="只删除（不恢复）" onClick={() => setConfirmDrop(s.index)}>
+                        <button title={t('rightsidebar.drop_only')} onClick={() => setConfirmDrop(s.index)}>
                           <i className="ti ti-trash" />
                         </button>
                       </>
@@ -167,6 +170,7 @@ function ExplainBody({
   loading: boolean
   onRun: () => void
 }) {
+  const { t } = useTranslation()
   const matches = explanation && explanation.sha === commitId
   if (matches) {
     return (
@@ -179,13 +183,13 @@ function ExplainBody({
         ) : (
           <div className="rs-loading">
             <i className="ti ti-loader-2" />
-            <span>AI 正在分析这次改动…</span>
+            <span>{t('rightsidebar.explain_thinking')}</span>
           </div>
         )}
         {!loading && (
           <button className="rs-explain-redo" onClick={onRun}>
             <i className="ti ti-refresh" />
-            重新生成
+            {t('rightsidebar.explain_regenerate')}
           </button>
         )}
       </>
@@ -195,24 +199,14 @@ function ExplainBody({
     return (
       <div className="rs-loading">
         <i className="ti ti-loader-2" />
-        <span>AI 正在分析这次改动…</span>
+        <span>{t('rightsidebar.explain_thinking')}</span>
       </div>
     )
   }
   return (
     <button className="rs-explain-cta" onClick={onRun}>
       <i className="ti ti-sparkles" />
-      用 AI 解释这次改动
+      {t('rightsidebar.explain_cta')}
     </button>
   )
-}
-
-function relTime(t: number): string {
-  const secs = Date.now() / 1000 - t
-  if (secs < 60) return '刚刚'
-  if (secs < 3600) return `${Math.floor(secs / 60)} 分钟前`
-  if (secs < 86400) return `${Math.floor(secs / 3600)} 小时前`
-  if (secs < 86400 * 30) return `${Math.floor(secs / 86400)} 天前`
-  const d = new Date(t * 1000)
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
 }

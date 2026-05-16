@@ -418,50 +418,50 @@ function TagsSection({ filter }: { filter: string }) {
         <div className="branches-empty">{t('branches.empty_tags')}</div>
       ) : (
         <div className="branches-list">
-          {filtered.map(t => (
-            <div key={t.name} className="branch-row" title={t.annotated ? (t.message || '附注标签') : '轻量标签'}>
-              <i className={`ti ${t.annotated ? 'ti-tag-filled' : 'ti-tag'} branch-icon`} />
-              <span className="branch-name">{t.name}</span>
-              <span className="branch-upstream">{t.annotated && t.tagger ? t.tagger : ''}</span>
+          {filtered.map(tag => (
+            <div key={tag.name} className="branch-row" title={tag.annotated ? (tag.message || '') : ''}>
+              <i className={`ti ${tag.annotated ? 'ti-tag-filled' : 'ti-tag'} branch-icon`} />
+              <span className="branch-name">{tag.name}</span>
+              <span className="branch-upstream">{tag.annotated && tag.tagger ? tag.tagger : ''}</span>
               <span className="branch-counts" />
-              <span className="branch-last" title={t.message || ''}>{t.message || ''}</span>
+              <span className="branch-last" title={tag.message || ''}>{tag.message || ''}</span>
               <span className="branch-meta">
-                <span className="branch-sha">{t.targetShort}</span>
-                <span className="branch-time">{t.time ? relTime(t.time) : ''}</span>
+                <span className="branch-sha">{tag.targetShort}</span>
+                <span className="branch-time">{tag.time ? relTime(tag.time) : ''}</span>
                 <div className="commit-actions" onClick={e => e.stopPropagation()}>
                   <button
                     className="commit-actions-btn"
-                    onClick={() => setMenuFor(menuFor === t.name ? null : t.name)}
-                    title="标签操作"
+                    onClick={() => setMenuFor(menuFor === tag.name ? null : tag.name)}
+                    title={t('cheatsheet.kebab_desc')}
                   >
                     <i className="ti ti-dots-vertical" />
                   </button>
-                  {menuFor === t.name && (
+                  {menuFor === tag.name && (
                     <div className="commit-actions-menu">
                       <button
                         onClick={async () => {
                           setMenuFor(null)
-                          try { await pushTag('origin', t.name) }
+                          try { await pushTag('origin', tag.name) }
                           catch (e) { showToast(String(e), 'error') }
                         }}
                       >
                         <i className="ti ti-cloud-upload" />
-                        <span>推送到 origin</span>
+                        <span>{t('branches.push_to_remote')}</span>
                       </button>
                       <button
                         onClick={async () => {
                           setMenuFor(null)
                           try {
-                            await deleteRemoteTag('origin', t.name)
+                            await deleteRemoteTag('origin', tag.name)
                           } catch (e) { showToast(String(e), 'error') }
                         }}
                       >
                         <i className="ti ti-cloud-off" />
-                        <span>从 origin 删除</span>
+                        <span>{t('branches.delete_from_remote')}</span>
                       </button>
-                      <button onClick={() => { setMenuFor(null); setConfirmDelete(t) }}>
+                      <button onClick={() => { setMenuFor(null); setConfirmDelete(tag) }}>
                         <i className="ti ti-trash" />
-                        <span>删除本地标签</span>
+                        <span>{t('branches.delete_local_tag')}</span>
                       </button>
                     </div>
                   )}
