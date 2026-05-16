@@ -207,6 +207,12 @@ export const zh = {
     shortcuts_desc: '列出所有快捷键 · 直接按 ? 也能弹',
     importing_warn: '即将覆盖 {{count}} 项本机设置。继续？',
     import_fail: '导入失败：{{reason}}',
+    provider_anthropic_hint: '官方 Claude API · api.anthropic.com',
+    provider_openai_hint: '官方 GPT 系列 · api.openai.com',
+    provider_deepseek_hint: '深度求索 · api.deepseek.com',
+    provider_kimi_hint: '月之暗面 · api.moonshot.cn',
+    provider_compat_hint: '自定义 base URL · 本地 vLLM、Ollama、其他第三方',
+    unconfigured: '未配置',
   },
 
   branches: {

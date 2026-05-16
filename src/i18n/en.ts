@@ -206,6 +206,12 @@ export const en: Translations = {
     shortcuts_desc: 'List all shortcuts · or press ? anywhere',
     importing_warn: 'About to overwrite {{count}} local settings. Continue?',
     import_fail: 'Import failed: {{reason}}',
+    provider_anthropic_hint: 'Official Claude API · api.anthropic.com',
+    provider_openai_hint: 'Official GPT series · api.openai.com',
+    provider_deepseek_hint: 'DeepSeek · api.deepseek.com',
+    provider_kimi_hint: 'Moonshot · api.moonshot.cn',
+    provider_compat_hint: 'Custom base URL · local vLLM, Ollama, etc.',
+    unconfigured: 'Not configured',
   },
 
   branches: {

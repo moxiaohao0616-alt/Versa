@@ -47,18 +47,18 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
       diag = '(failed to collect diagnostic info)'
     }
     const report = [
-      '## Versa 崩溃报告',
+      '## Versa crash report',
       '',
-      '### 环境',
+      '### Environment',
       diag,
       '',
-      '### 错误',
+      '### Error',
       '```',
       error?.message ?? '(no message)',
       error?.stack ?? '(no stack)',
       '```',
       '',
-      '### 组件栈',
+      '### Component stack',
       '```',
       errorInfo?.componentStack ?? '(none)',
       '```',

@@ -8,16 +8,17 @@ import { setLanguage } from '../../i18n'
 
 type Theme = 'light' | 'dark' | 'system'
 
-const THEMES: { value: Theme; label: string; previewClass: string }[] = [
-  { value: 'light',  label: '浅色',    previewClass: 'tp-light' },
-  { value: 'dark',   label: '深色',    previewClass: 'tp-dark'  },
-  { value: 'system', label: '跟随系统', previewClass: 'tp-sys'   },
+const THEME_OPTIONS: { value: Theme; previewClass: string }[] = [
+  { value: 'light',  previewClass: 'tp-light' },
+  { value: 'dark',   previewClass: 'tp-dark'  },
+  { value: 'system', previewClass: 'tp-sys'   },
 ]
 
 interface ProviderMeta {
   value: AIProvider
   label: string
-  hint: string
+  /** Translation key under `settings.provider_*_hint`. */
+  hintKey: string
   defaultModel: string
   /** When true, hide the Base URL field — backend has a preset. */
   hasPresetBaseUrl: boolean
@@ -29,7 +30,7 @@ const PROVIDERS: ProviderMeta[] = [
   {
     value: 'anthropic',
     label: 'Anthropic Claude',
-    hint: '官方 Claude API · api.anthropic.com',
+    hintKey: 'settings.provider_anthropic_hint',
     defaultModel: 'claude-sonnet-4-6',
     hasPresetBaseUrl: true,
     keyPlaceholder: 'sk-ant-...',
@@ -37,7 +38,7 @@ const PROVIDERS: ProviderMeta[] = [
   {
     value: 'openai',
     label: 'OpenAI',
-    hint: '官方 GPT 系列 · api.openai.com',
+    hintKey: 'settings.provider_openai_hint',
     defaultModel: 'gpt-4o-mini',
     hasPresetBaseUrl: true,
     keyPlaceholder: 'sk-...',
@@ -45,7 +46,7 @@ const PROVIDERS: ProviderMeta[] = [
   {
     value: 'deepseek',
     label: 'DeepSeek',
-    hint: '深度求索 · api.deepseek.com',
+    hintKey: 'settings.provider_deepseek_hint',
     defaultModel: 'deepseek-chat',
     hasPresetBaseUrl: true,
     keyPlaceholder: 'sk-...',
@@ -53,15 +54,15 @@ const PROVIDERS: ProviderMeta[] = [
   {
     value: 'kimi',
     label: 'Kimi (Moonshot)',
-    hint: '月之暗面 · api.moonshot.cn',
+    hintKey: 'settings.provider_kimi_hint',
     defaultModel: 'moonshot-v1-32k',
     hasPresetBaseUrl: true,
     keyPlaceholder: 'sk-...',
   },
   {
     value: 'openai-compatible',
-    label: 'OpenAI 兼容',
-    hint: '自定义 base URL · 本地 vLLM、Ollama、其他第三方',
+    label: 'OpenAI compatible',
+    hintKey: 'settings.provider_compat_hint',
     defaultModel: '',
     hasPresetBaseUrl: false,
     keyPlaceholder: 'sk-...',
@@ -113,38 +114,38 @@ function MainSettings({
   onOpenShortcuts: () => void
 }) {
   const { theme, setTheme, aiConfig, graphLoadStep, setGraphLoadStep, gpgSign, setGpgSign } = useStore()
-  const { i18n } = useTranslation()
-  const providerLabel = PROVIDER_MAP.get(aiConfig.provider)?.label ?? '未配置'
+  const { t, i18n } = useTranslation()
+  const providerLabel = PROVIDER_MAP.get(aiConfig.provider)?.label ?? t('settings.unconfigured')
   const aiConfigured = aiConfig.apiKey.trim().length > 0
 
   return (
     <div className="settings-view">
-      <h2 className="settings-page-title">设置</h2>
+      <h2 className="settings-page-title">{t('settings.title')}</h2>
 
       <div className="settings-section">
-        <p className="settings-section-title">通用</p>
+        <p className="settings-section-title">{t('settings.general')}</p>
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-label">主题</p>
-            <p className="settings-row-desc">选择界面外观，或跟随系统自动切换</p>
+            <p className="settings-row-label">{t('settings.theme')}</p>
+            <p className="settings-row-desc">{t('settings.theme_desc')}</p>
           </div>
           <div className="theme-picker">
-            {THEMES.map(t => (
+            {THEME_OPTIONS.map(opt => (
               <button
-                key={t.value}
-                className={`theme-card ${theme === t.value ? 'selected' : ''}`}
-                onClick={() => setTheme(t.value)}
-                aria-pressed={theme === t.value}
+                key={opt.value}
+                className={`theme-card ${theme === opt.value ? 'selected' : ''}`}
+                onClick={() => setTheme(opt.value)}
+                aria-pressed={theme === opt.value}
               >
-                <div className={`theme-preview ${t.previewClass}`}>
+                <div className={`theme-preview ${opt.previewClass}`}>
                   <div className="tp-bar" />
                   <div className="tp-lines">
                     <div className="tp-line" />
                     <div className="tp-line" />
                   </div>
                 </div>
-                <span className="theme-card-label">{t.label}</span>
+                <span className="theme-card-label">{t(`settings.theme_${opt.value}`)}</span>
               </button>
             ))}
           </div>
@@ -152,10 +153,8 @@ function MainSettings({
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-label">提交历史 · 每次加载</p>
-            <p className="settings-row-desc">
-              "再加载" 按钮每点一次拉多少条提交。50–2000 之间。
-            </p>
+            <p className="settings-row-label">{t('settings.history_step')}</p>
+            <p className="settings-row-desc">{t('settings.history_step_desc')}</p>
           </div>
           <input
             className="settings-input"
@@ -171,11 +170,8 @@ function MainSettings({
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-label">界面语言 · Language</p>
-            <p className="settings-row-desc">
-              切换 Versa 自身 UI 的语言（不影响仓库内容）。i18n 还在渐进迁移，
-              部分文案暂时仍是中文。
-            </p>
+            <p className="settings-row-label">{t('settings.language')}</p>
+            <p className="settings-row-desc">{t('settings.language_desc')}</p>
           </div>
           <select
             className="settings-input"
@@ -190,15 +186,12 @@ function MainSettings({
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">提交</p>
+        <p className="settings-section-title">{t('settings.commit')}</p>
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-label">为提交签名（GPG / SSH）</p>
-            <p className="settings-row-desc">
-              开启后所有"保存进度"会以 <code>git commit -S</code> 提交，依赖你的
-              <code> user.signingkey</code> / <code>gpg.format</code> 等本地 git 配置。
-            </p>
+            <p className="settings-row-label">{t('settings.gpg')}</p>
+            <p className="settings-row-desc">{t('settings.gpg_desc')}</p>
           </div>
           <label className="toggle">
             <input
@@ -212,18 +205,18 @@ function MainSettings({
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">集成</p>
+        <p className="settings-section-title">{t('settings.integrations')}</p>
 
         <button className="settings-nav-row" onClick={onOpenAI} type="button">
           <div className="settings-nav-icon">
             <i className="ti ti-sparkles" />
           </div>
           <div className="settings-nav-text">
-            <p className="settings-row-label">AI 服务商</p>
+            <p className="settings-row-label">{t('settings.ai_provider')}</p>
             <p className="settings-row-desc">
               {aiConfigured
-                ? `当前：${providerLabel}`
-                : '配置 Claude / OpenAI / DeepSeek / Kimi'}
+                ? t('settings.ai_provider_current', { label: providerLabel })
+                : t('settings.ai_provider_unset')}
             </p>
           </div>
           <div className="settings-nav-status">
@@ -237,8 +230,8 @@ function MainSettings({
             <i className="ti ti-cloud" />
           </div>
           <div className="settings-nav-text">
-            <p className="settings-row-label">远程仓库</p>
-            <p className="settings-row-desc">添加 / 重命名 / 修改 URL / 删除 remote</p>
+            <p className="settings-row-label">{t('settings.remotes')}</p>
+            <p className="settings-row-desc">{t('settings.remotes_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />
@@ -250,8 +243,8 @@ function MainSettings({
             <i className="ti ti-binary" />
           </div>
           <div className="settings-nav-text">
-            <p className="settings-row-label">Git LFS · 大文件</p>
-            <p className="settings-row-desc">追踪二进制 / 设计稿 / 模型权重等大文件</p>
+            <p className="settings-row-label">{t('settings.lfs')}</p>
+            <p className="settings-row-desc">{t('settings.lfs_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />
@@ -260,23 +253,21 @@ function MainSettings({
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">数据</p>
+        <p className="settings-section-title">{t('settings.data')}</p>
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-label">导入 / 导出设置</p>
-            <p className="settings-row-desc">
-              把 AI Key、主题、偏好等本机配置打包成 JSON。换机器恢复时用导入。
-            </p>
+            <p className="settings-row-label">{t('settings.import_export')}</p>
+            <p className="settings-row-desc">{t('settings.import_export_desc')}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-secondary" onClick={handleExportSettings}>
               <i className="ti ti-file-export" />
-              导出
+              {t('settings.export')}
             </button>
             <button className="btn-secondary" onClick={handleImportSettings}>
               <i className="ti ti-file-import" />
-              导入
+              {t('settings.import')}
             </button>
           </div>
         </div>
@@ -286,8 +277,8 @@ function MainSettings({
             <i className="ti ti-keyboard" />
           </div>
           <div className="settings-nav-text">
-            <p className="settings-row-label">键盘快捷键</p>
-            <p className="settings-row-desc">列出所有快捷键 · 直接按 <kbd>?</kbd> 也能弹</p>
+            <p className="settings-row-label">{t('settings.shortcuts')}</p>
+            <p className="settings-row-desc">{t('settings.shortcuts_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />
@@ -299,8 +290,8 @@ function MainSettings({
             <i className="ti ti-info-circle" />
           </div>
           <div className="settings-nav-text">
-            <p className="settings-row-label">关于 Versa</p>
-            <p className="settings-row-desc">版本 / 诊断信息 / 复制给开发者</p>
+            <p className="settings-row-label">{t('settings.about')}</p>
+            <p className="settings-row-desc">{t('settings.about_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />
@@ -418,9 +409,9 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
   return (
     <div className="settings-view">
       <div className="settings-subpage-header">
-        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="返回">
+        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="Back">
           <i className="ti ti-chevron-left" />
-          <span>设置</span>
+          <span>Settings</span>
         </button>
         <h2 className="settings-page-title settings-subpage-title">远程仓库</h2>
       </div>
@@ -504,17 +495,18 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
 // ── AI sub-page ───────────────────────────────────────────────────────────
 
 function AISettings({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation()
   const { aiConfig, setAIConfig } = useStore()
   const [showKey, setShowKey] = useState(false)
   const meta = PROVIDER_MAP.get(aiConfig.provider) ?? PROVIDERS[0]
-  const modelPlaceholder = meta.defaultModel || '必须填写'
+  const modelPlaceholder = meta.defaultModel || t('common.required')
 
   return (
     <div className="settings-view">
       <div className="settings-subpage-header">
-        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="返回">
+        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="Back">
           <i className="ti ti-chevron-left" />
-          <span>设置</span>
+          <span>Settings</span>
         </button>
         <h2 className="settings-page-title settings-subpage-title">AI 服务商</h2>
       </div>
@@ -536,7 +528,7 @@ function AISettings({ onBack }: { onBack: () => void }) {
               type="button"
             >
               <span className="provider-card-label">{p.label}</span>
-              <span className="provider-card-hint">{p.hint}</span>
+              <span className="provider-card-hint">{t(p.hintKey)}</span>
             </button>
           ))}
         </div>
@@ -659,9 +651,9 @@ function LfsSettings({ onBack }: { onBack: () => void }) {
   return (
     <div className="settings-view">
       <div className="settings-subpage-header">
-        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="返回">
+        <button className="settings-back-btn" onClick={onBack} type="button" aria-label="Back">
           <i className="ti ti-chevron-left" />
-          <span>设置</span>
+          <span>Settings</span>
         </button>
         <h2 className="settings-page-title settings-subpage-title">Git LFS</h2>
       </div>
