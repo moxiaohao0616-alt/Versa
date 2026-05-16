@@ -585,6 +585,16 @@ export const en: Translations = {
     menu_reset: 'Reset to this commit…',
     menu_reset_hint: 'Move current branch back to this commit',
     menu_tag: 'Tag this commit…',
+    revert_msg_label: 'Revert commit message (editable)',
+    cherrypick_msg_label: 'Commit message (editable)',
+    loading_default_msg: 'Loading default message…',
+    revert_warn: "Creates a new commit on the current branch that inverts this commit's changes. The original commit stays in history.",
+    cherrypick_warn: "Copies this commit's changes as a new commit on the current branch. The original commit is untouched. Conflicts will stop you here to resolve.",
+    bisect_start_title: 'Start bisect from here?',
+    bisect_start_warn: 'Marks the current branch HEAD as "bad" and the picked commit as "good". Git will check out a midpoint between them for you to test. Each "good"/"bad" answer halves the search space until the first bad commit is found.',
+    bisect_start_confirm: 'Start',
+    ai_recommended: 'AI recommends: ',
+    tag_modal_title_short: 'Create tag',
   },
 
   rebase: {

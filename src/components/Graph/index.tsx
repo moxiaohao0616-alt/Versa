@@ -578,21 +578,21 @@ export function GraphView() {
                 <span className="graph-sha">{revertTarget.shortId}</span>
                 <span className="modal-commit-msg">{revertTarget.message}</span>
               </div>
-              <label className="commit-msg-label">撤销提交的说明（可改）</label>
+              <label className="commit-msg-label">{t('graph.revert_msg_label')}</label>
               <textarea
                 className="commit-input commit-msg-input"
                 value={revertMsg}
                 onChange={e => setRevertMsg(e.target.value)}
                 rows={5}
-                placeholder="正在加载默认说明…"
+                placeholder={t('graph.loading_default_msg')}
               />
               <p className="modal-warn">
                 <i className="ti ti-info-circle" />
-                会在当前分支上新建一个提交，反转这条提交的所有改动。原提交保留在历史里，不会被删除。
+                {t('graph.revert_warn')}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setRevertTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setRevertTarget(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 disabled={!revertMsg.trim()}
@@ -614,27 +614,27 @@ export function GraphView() {
       {cherryTarget && (
         <div className="modal-overlay" onClick={() => setCherryTarget(null)}>
           <div className="modal commit-msg-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">拣选到当前分支？</div>
+            <div className="modal-title">{t('graph.cherrypick_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{cherryTarget.shortId}</span>
                 <span className="modal-commit-msg">{cherryTarget.message}</span>
               </div>
-              <label className="commit-msg-label">提交说明（可改）</label>
+              <label className="commit-msg-label">{t('graph.cherrypick_msg_label')}</label>
               <textarea
                 className="commit-input commit-msg-input"
                 value={cherryMsg}
                 onChange={e => setCherryMsg(e.target.value)}
                 rows={5}
-                placeholder="正在加载默认说明…"
+                placeholder={t('graph.loading_default_msg')}
               />
               <p className="modal-warn">
                 <i className="ti ti-info-circle" />
-                会把这条提交的改动复制成当前分支上的一个新提交，原 commit 不动。如果有冲突会停下来让你处理。
+                {t('graph.cherrypick_warn')}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setCherryTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setCherryTarget(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 disabled={!cherryMsg.trim()}
@@ -646,7 +646,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-cherry" />
-                确认拣选
+                {t('graph.cherrypick_confirm')}
               </button>
             </div>
           </div>
@@ -658,12 +658,12 @@ export function GraphView() {
       {bisectStartTarget && (
         <div className="modal-overlay" onClick={() => { setBisectStartTarget(null); setBisectAiReason(null) }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">从这里开始查找问题？</div>
+            <div className="modal-title">{t('graph.bisect_start_title')}</div>
             <div className="modal-body">
               {bisectAiReason && (
                 <div className="bisect-ai-reason">
                   <i className="ti ti-sparkles" />
-                  <span><strong>AI 推荐：</strong>{bisectAiReason}</span>
+                  <span><strong>{t('graph.ai_recommended')}</strong>{bisectAiReason}</span>
                 </div>
               )}
               <div className="modal-commit-preview">
@@ -672,11 +672,11 @@ export function GraphView() {
               </div>
               <p className="modal-warn">
                 <i className="ti ti-info-circle" />
-                把当前分支头标为「这版已经坏了」，把所选 commit 标为「那时候还能用」。git 会在两者之间二分检出中间版本让你测试。每次你回答「好」或「坏」，搜索范围减半，直到找到第一个出问题的提交。
+                {t('graph.bisect_start_warn')}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => { setBisectStartTarget(null); setBisectAiReason(null) }}>取消</button>
+              <button className="btn-secondary" onClick={() => { setBisectStartTarget(null); setBisectAiReason(null) }}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 onClick={async () => {
@@ -687,7 +687,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-search" />
-                开始查找
+                {t('graph.bisect_start_confirm')}
               </button>
             </div>
           </div>
@@ -697,7 +697,7 @@ export function GraphView() {
       {resetTarget && (
         <div className="modal-overlay" onClick={() => setResetTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">回退到这版？</div>
+            <div className="modal-title">{t('graph.reset_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{resetTarget.shortId}</span>
@@ -707,28 +707,28 @@ export function GraphView() {
                 <label className={`reset-mode ${resetMode === 'soft' ? 'active' : ''}`}>
                   <input type="radio" checked={resetMode === 'soft'} onChange={() => setResetMode('soft')} />
                   <div>
-                    <div className="reset-mode-name">软回退（--soft）</div>
-                    <div className="reset-mode-desc">分支指针移动，已暂存和工作区保留。最安全。</div>
+                    <div className="reset-mode-name">{t('graph.reset_soft_label')}</div>
+                    <div className="reset-mode-desc">{t('graph.reset_soft_desc')}</div>
                   </div>
                 </label>
                 <label className={`reset-mode ${resetMode === 'mixed' ? 'active' : ''}`}>
                   <input type="radio" checked={resetMode === 'mixed'} onChange={() => setResetMode('mixed')} />
                   <div>
-                    <div className="reset-mode-name">混合回退（--mixed，默认）</div>
-                    <div className="reset-mode-desc">分支指针移动，暂存区清空，工作区保留。</div>
+                    <div className="reset-mode-name">{t('graph.reset_mixed_label')}</div>
+                    <div className="reset-mode-desc">{t('graph.reset_mixed_desc')}</div>
                   </div>
                 </label>
                 <label className={`reset-mode danger ${resetMode === 'hard' ? 'active' : ''}`}>
                   <input type="radio" checked={resetMode === 'hard'} onChange={() => setResetMode('hard')} />
                   <div>
-                    <div className="reset-mode-name">硬回退（--hard）</div>
-                    <div className="reset-mode-desc">所有未提交的改动都会丢。不可撤销！</div>
+                    <div className="reset-mode-name">{t('graph.reset_hard_label')}</div>
+                    <div className="reset-mode-desc">{t('graph.reset_hard_desc')}</div>
                   </div>
                 </label>
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setResetTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setResetTarget(null)}>{t('common.cancel')}</button>
               <button
                 className={resetMode === 'hard' ? 'btn-danger' : 'btn-primary'}
                 onClick={async () => {
@@ -739,7 +739,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-rewind-backward-10" />
-                确认回退
+                {t('graph.reset_confirm')}
               </button>
             </div>
           </div>
@@ -749,7 +749,7 @@ export function GraphView() {
       {tagTarget && (
         <div className="modal-overlay" onClick={() => setTagTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">打标签</div>
+            <div className="modal-title">{t('graph.tag_modal_title_short')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{tagTarget.shortId}</span>
@@ -757,14 +757,14 @@ export function GraphView() {
               </div>
               <input
                 className="settings-input"
-                placeholder="标签名称（如 v1.0.0）"
+                placeholder={t('branches.tag_name_placeholder')}
                 value={tagName}
                 onChange={e => setTagName(e.target.value)}
                 autoFocus
               />
               <textarea
                 className="commit-input"
-                placeholder="可选：标签说明（填了就是 annotated tag）"
+                placeholder={t('branches.tag_message_placeholder')}
                 rows={3}
                 value={tagMessage}
                 onChange={e => setTagMessage(e.target.value)}
@@ -772,7 +772,7 @@ export function GraphView() {
               />
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setTagTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setTagTarget(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 disabled={!tagName.trim()}
@@ -786,7 +786,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-tag" />
-                创建标签
+                {t('branches.create_tag')}
               </button>
             </div>
           </div>
@@ -796,15 +796,15 @@ export function GraphView() {
       {showLoadAllConfirm && (
         <div className="modal-overlay" onClick={() => setShowLoadAllConfirm(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">加载全部历史？</div>
+            <div className="modal-title">{t('graph.load_all_confirm_title')}</div>
             <div className="modal-body">
               <p className="modal-warn">
                 <i className="ti ti-alert-triangle" />
-                目前已加载 {commits.length} 条。仓库可能很深；一次性拉全部历史在大仓库上可能要等几秒到几十秒，期间界面会卡。继续？
+                {t('graph.load_all_warn', { count: commits.length })}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowLoadAllConfirm(false)}>取消</button>
+              <button className="btn-secondary" onClick={() => setShowLoadAllConfirm(false)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 onClick={() => {
@@ -813,7 +813,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-stack" />
-                确认加载
+                {t('graph.load_all_confirm')}
               </button>
             </div>
           </div>

@@ -586,6 +586,16 @@ export const zh = {
     menu_reset: '回退到这版…',
     menu_reset_hint: '把当前分支移回这版',
     menu_tag: '打标签…',
+    revert_msg_label: '撤销提交的说明（可改）',
+    cherrypick_msg_label: '提交说明（可改）',
+    loading_default_msg: '正在加载默认说明…',
+    revert_warn: '会在当前分支上新建一个提交，反转这条提交的所有改动。原提交保留在历史里，不会被删除。',
+    cherrypick_warn: '会把这条提交的改动复制成当前分支上的一个新提交，原 commit 不动。如果有冲突会停下来让你处理。',
+    bisect_start_title: '从这里开始查找问题？',
+    bisect_start_warn: '把当前分支头标为「这版已经坏了」，把所选 commit 标为「那时候还能用」。git 会在两者之间二分检出中间版本让你测试。每次你回答「好」或「坏」，搜索范围减半，直到找到第一个出问题的提交。',
+    bisect_start_confirm: '开始查找',
+    ai_recommended: 'AI 推荐：',
+    tag_modal_title_short: '打标签',
   },
 
   rebase: {
