@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 /** Global keyboard cheatsheet. Opened by pressing `?` (no modifier) anywhere
  *  outside an editable element. Keep grouped + ordered for scanability. */
 
@@ -7,53 +9,55 @@ type Group = { title: string; items: Shortcut[] }
 // Pick the right modifier symbol for the platform.
 const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 
-const GROUPS: Group[] = [
-  {
-    title: '通用',
-    items: [
-      { keys: ['?'],          desc: '打开这个快捷键面板' },
-      { keys: ['Esc'],        desc: '关闭弹层 / 取消正在跑的 AI' },
-      { keys: [MOD, '`'],     desc: '切换 Terminal' },
-    ],
-  },
-  {
-    title: '多仓库 Tab',
-    items: [
-      { keys: [MOD, 'W'],            desc: '关闭当前仓库 tab' },
-      { keys: [MOD, '⇧', ']'],       desc: '切到下一个 tab' },
-      { keys: [MOD, '⇧', '['],       desc: '切到上一个 tab' },
-    ],
-  },
-  {
-    title: 'Diff 查看',
-    items: [
-      { keys: [MOD, 'F'],   desc: '在当前 diff 里搜文本' },
-      { keys: [MOD, '↑'],   desc: '上一个文件' },
-      { keys: [MOD, '↓'],   desc: '下一个文件' },
-      { keys: ['Alt', '↑'], desc: '上一处改动（hunk）' },
-      { keys: ['Alt', '↓'], desc: '下一处改动（hunk）' },
-    ],
-  },
-  {
-    title: '提交 / 历史',
-    items: [
-      { keys: ['双击分支'], desc: '切换分支（本地）/ 在本地创建并切换（远程）' },
-      { keys: ['双击 commit'], desc: '查看那次的改动' },
-      { keys: ['⋮'],         desc: '在分支 / commit 行的右侧打开操作菜单' },
-    ],
-  },
-]
-
 export function CheatsheetModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const groups: Group[] = [
+    {
+      title: t('cheatsheet.group_general'),
+      items: [
+        { keys: ['?'],          desc: t('cheatsheet.open_panel') },
+        { keys: ['Esc'],        desc: t('cheatsheet.cancel_modal') },
+        { keys: [MOD, '`'],     desc: t('cheatsheet.toggle_terminal') },
+      ],
+    },
+    {
+      title: t('cheatsheet.group_tabs'),
+      items: [
+        { keys: [MOD, 'W'],            desc: t('cheatsheet.close_tab') },
+        { keys: [MOD, '⇧', ']'],       desc: t('cheatsheet.next_tab') },
+        { keys: [MOD, '⇧', '['],       desc: t('cheatsheet.prev_tab') },
+      ],
+    },
+    {
+      title: t('cheatsheet.group_diff'),
+      items: [
+        { keys: [MOD, 'F'],   desc: t('cheatsheet.search_diff') },
+        { keys: [MOD, '↑'],   desc: t('cheatsheet.prev_file') },
+        { keys: [MOD, '↓'],   desc: t('cheatsheet.next_file') },
+        { keys: ['Alt', '↑'], desc: t('cheatsheet.prev_hunk') },
+        { keys: ['Alt', '↓'], desc: t('cheatsheet.next_hunk') },
+      ],
+    },
+    {
+      title: t('cheatsheet.group_history'),
+      items: [
+        { keys: [t('cheatsheet.dblclick_branch')], desc: t('cheatsheet.dblclick_branch_desc') },
+        { keys: [t('cheatsheet.dblclick_commit')], desc: t('cheatsheet.dblclick_commit_desc') },
+        { keys: [t('cheatsheet.kebab')],           desc: t('cheatsheet.kebab_desc') },
+      ],
+    },
+  ]
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide cheatsheet-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-title">
           <i className="ti ti-command" style={{ marginRight: 6 }} />
-          快捷键
+          {t('cheatsheet.title')}
         </div>
         <div className="cheatsheet-body">
-          {GROUPS.map(g => (
+          {groups.map(g => (
             <section key={g.title} className="cheatsheet-section">
               <h4>{g.title}</h4>
               <ul>
@@ -72,7 +76,7 @@ export function CheatsheetModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>关闭（Esc）</button>
+          <button className="btn-secondary" onClick={onClose}>{t('cheatsheet.close_hint')}</button>
         </div>
       </div>
     </div>

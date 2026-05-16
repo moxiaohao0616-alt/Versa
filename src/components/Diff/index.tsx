@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../../i18n'
 import { useStore } from '../../store'
 import type { DiffLine, DiffResult } from '../../store'
 import { buildHunkInlineDiffs, type CharSeg } from './wordDiff'
@@ -85,6 +87,7 @@ function lastAtOrAbove(offsets: number[], y: number): number {
 }
 
 export function DiffView() {
+  const { t } = useTranslation()
   const {
     diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit,
     stageHunk, unstageHunk, showToast,
@@ -322,27 +325,27 @@ export function DiffView() {
             <button
               className={`ct-btn ghost ${diffWordLevel ? 'active' : ''}`}
               onClick={() => setDiffWordLevel(!diffWordLevel)}
-              title="行内单词级高亮（开关）"
+              title={t('diff.word_level_tooltip')}
             >
               <i className="ti ti-letter-w" />
-              <span>词级</span>
+              <span>{t('diff.word_level')}</span>
             </button>
             <button
               className={`ct-btn ghost ${diffIgnoreWhitespace ? 'active' : ''}`}
               onClick={() => setDiffIgnoreWhitespace(!diffIgnoreWhitespace)}
-              title="忽略空白差异（git diff -w）"
+              title={t('diff.ignore_whitespace_tooltip')}
             >
               <i className="ti ti-space" />
-              <span>忽略空白</span>
+              <span>{t('diff.ignore_whitespace')}</span>
             </button>
             {selectedFile && (
               <button
                 className="ct-btn ghost"
                 onClick={() => setBlameOpen(true)}
-                title="查看这个文件的 blame（每行是谁、哪次改的）"
+                title={t('diff.blame_tooltip')}
               >
                 <i className="ti ti-user-search" />
-                <span>Blame</span>
+                <span>{t('diff.blame')}</span>
               </button>
             )}
             {fileIndices.length > 1 && (
@@ -351,7 +354,7 @@ export function DiffView() {
                   className="ct-btn ghost"
                   onClick={goPrevFile}
                   disabled={!canPrevFile}
-                  title="上一个文件 (⌘↑)"
+                  title={t('diff.prev_file')}
                 >
                   <i className="ti ti-chevrons-up" />
                 </button>
@@ -362,7 +365,7 @@ export function DiffView() {
                   className="ct-btn ghost"
                   onClick={goNextFile}
                   disabled={!canNextFile}
-                  title="下一个文件 (⌘↓)"
+                  title={t('diff.next_file')}
                 >
                   <i className="ti ti-chevrons-down" />
                 </button>
@@ -378,7 +381,7 @@ export function DiffView() {
                   className="ct-btn ghost"
                   onClick={goPrev}
                   disabled={!canPrev}
-                  title="上一处改动 (Alt+↑)"
+                  title={t('diff.prev_hunk')}
                 >
                   <i className="ti ti-chevron-up" />
                 </button>
@@ -389,7 +392,7 @@ export function DiffView() {
                   className="ct-btn ghost"
                   onClick={goNext}
                   disabled={!canNext}
-                  title="下一处改动 (Alt+↓)"
+                  title={t('diff.next_hunk')}
                 >
                   <i className="ti ti-chevron-down" />
                 </button>
@@ -405,7 +408,7 @@ export function DiffView() {
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="在 diff 中搜索…"
+            placeholder={t('diff.search_placeholder')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => {
@@ -419,7 +422,7 @@ export function DiffView() {
           />
           <span className="diff-search-count">
             {searchHits.length === 0
-              ? (searchQuery ? '0 处' : '')
+              ? (searchQuery ? t('diff.search_count_none') : '')
               : `${searchHit + 1} / ${searchHits.length}`}
           </span>
           <button
@@ -452,7 +455,7 @@ export function DiffView() {
         {!hasFiles && (
           <div className="empty-state center">
             <i className="ti ti-circle-check" style={{ fontSize: 40, opacity: 0.15 }} />
-            <p>没有待提交的改动</p>
+            <p>{t('diff.no_changes')}</p>
           </div>
         )}
         {hasFiles && !selectedFile && items.length === 0 && (
@@ -532,10 +535,10 @@ function renderItem(item: VItem, actions: RenderActions) {
             onClick={() => op === 'stage'
               ? actions.onStageHunk(item.file, item.hunkIndex)
               : actions.onUnstageHunk(item.file, item.hunkIndex)}
-            title={op === 'stage' ? '只暂存这一段' : '只把这一段从暂存区移除'}
+            title={op === 'stage' ? i18n.t('diff.stage_hunk_tooltip') : i18n.t('diff.unstage_hunk_tooltip')}
           >
             <i className={`ti ${op === 'stage' ? 'ti-plus' : 'ti-minus'}`} />
-            {op === 'stage' ? '暂存此段' : '取消暂存此段'}
+            {op === 'stage' ? i18n.t('diff.stage_hunk') : i18n.t('diff.unstage_hunk')}
           </button>
         )}
       </div>

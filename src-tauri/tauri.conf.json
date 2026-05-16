@@ -36,11 +36,30 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null,
+      "entitlements": null,
+      "providerShortName": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com"
+    }
   },
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxRjBGN0FCNjFBNDRDMzUKUldRMVRLUmhxL2Z3VVg1em5yTldHNjlnWlVZZ3ZEclJ4VFBQTmMxTTFpTEpjVlpteHRrTjR3cTEK",
+      "endpoints": [
+        "https://github.com/moxiaohao0616-alt/Versa/releases/latest/download/latest.json"
+      ]
     }
   }
 }

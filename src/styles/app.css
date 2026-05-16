@@ -1299,6 +1299,84 @@ body {
 }
 .toast-success { background: var(--green-bg); color: var(--green-text); border: 0.5px solid rgba(99,153,34,0.3); }
 .toast-error   { background: var(--red-bg);   color: var(--red-text);   border: 0.5px solid rgba(191,70,70,0.3); }
+.toast-copy {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 0.5px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.toast-copy:hover { opacity: 1; }
+.toast-copy > .ti { font-size: 12px; }
+
+/* ── Error boundary fallback ───────────────────────────────────────── */
+.errboundary {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 99999;
+}
+.errboundary-card {
+  max-width: 520px;
+  width: 100%;
+  padding: 32px;
+  border: 0.5px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg2);
+  text-align: center;
+}
+.errboundary-icon {
+  width: 56px; height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--red-bg);
+  color: var(--red-text);
+  font-size: 28px;
+  margin-bottom: 18px;
+}
+.errboundary-card h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.errboundary-sub {
+  font-size: 13px;
+  color: var(--text2);
+  margin: 0 0 16px;
+  line-height: 1.6;
+}
+.errboundary-message {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--red-text);
+  background: var(--red-bg);
+  padding: 10px 14px;
+  border-radius: 6px;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 18px;
+  max-height: 240px;
+  overflow: auto;
+}
+.errboundary-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -1775,6 +1853,24 @@ kbd {
 }
 .about-grid em { color: var(--text3); font-style: italic; }
 .about-path { font-size: 11px; }
+.about-update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+  font-size: 12.5px;
+}
+.about-update > span { flex: 1; min-width: 0; }
+.about-update-msg { color: var(--text3); }
+.about-update .ti-loader-2 {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+  margin-right: 6px;
+}
 
 /* ── Onboarding ──────────────────────────────────────────────────── */
 .onboarding-modal { width: 480px; }

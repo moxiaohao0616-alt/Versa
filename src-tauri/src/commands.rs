@@ -3896,3 +3896,81 @@ pub fn blame_file(
     }
     Ok(out)
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_compatible_defaults_for_known_providers() {
+        assert_eq!(openai_compatible_defaults("openai"),   ("https://api.openai.com/v1",   "gpt-4o-mini"));
+        assert_eq!(openai_compatible_defaults("deepseek"), ("https://api.deepseek.com/v1", "deepseek-chat"));
+        assert_eq!(openai_compatible_defaults("kimi"),     ("https://api.moonshot.cn/v1",  "moonshot-v1-32k"));
+    }
+
+    #[test]
+    fn openai_compatible_defaults_falls_back_to_empty() {
+        assert_eq!(openai_compatible_defaults("openai-compatible"), ("", ""));
+        assert_eq!(openai_compatible_defaults("unknown"), ("", ""));
+    }
+
+    #[test]
+    fn extract_openai_delta_parses_chunk() {
+        let data = r#"{"choices":[{"delta":{"content":"hello"}}]}"#;
+        assert_eq!(extract_openai_delta(data).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn extract_openai_delta_ignores_unrelated_shapes() {
+        assert!(extract_openai_delta("{}").is_none());
+        assert!(extract_openai_delta(r#"{"choices":[]}"#).is_none());
+    }
+
+    #[test]
+    fn extract_anthropic_delta_parses_text_event() {
+        let data = r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}"#;
+        assert_eq!(extract_anthropic_delta(data).as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn extract_anthropic_delta_ignores_other_events() {
+        let data = r#"{"type":"message_start"}"#;
+        assert!(extract_anthropic_delta(data).is_none());
+    }
+
+    #[test]
+    fn count_conflict_hunks_simple_file() {
+        let content = "before
+<<<<<<< HEAD
+ours
+=======
+theirs
+>>>>>>> branch
+after
+";
+        assert_eq!(count_conflict_hunks(content), 1);
+    }
+
+    #[test]
+    fn count_conflict_hunks_multi() {
+        let content = "<<<<<<<
+a
+=======
+b
+>>>>>>>
+
+<<<<<<<
+c
+=======
+d
+>>>>>>>";
+        assert_eq!(count_conflict_hunks(content), 2);
+    }
+
+    #[test]
+    fn count_conflict_hunks_clean_file() {
+        assert_eq!(count_conflict_hunks("nothing conflicting here
+"), 0);
+    }
+}

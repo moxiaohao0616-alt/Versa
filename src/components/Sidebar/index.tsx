@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import { StashModal } from '../Stash'
@@ -6,6 +7,7 @@ import { ReflogModal } from '../Reflog'
 import { GitProgressBar } from '../GitProgressBar'
 
 export function Sidebar() {
+  const { t } = useTranslation()
   const {
     repoPath, repoStatus, selectedFile, selectedFileStaged,
     selectedCommit, commitFiles,
@@ -149,7 +151,7 @@ export function Sidebar() {
                     <input
                       ref={newBranchInputRef}
                       className="new-branch-input"
-                      placeholder="分支名称"
+                      placeholder={t('sidebar.new_branch_placeholder')}
                       value={newBranchName}
                       onChange={e => setNewBranchName(e.target.value)}
                       onKeyDown={e => {
@@ -158,13 +160,13 @@ export function Sidebar() {
                       }}
                     />
                     <button className="new-branch-confirm" onClick={handleCreateBranch} disabled={!newBranchName.trim()}>
-                      创建
+                      {t('sidebar.confirm_create')}
                     </button>
                   </div>
                 ) : (
                   <button className="branch-dropdown-item" onClick={() => setNewBranchVisible(true)}>
                     <i className="ti ti-plus" />
-                    <span>新建分支</span>
+                    <span>{t('sidebar.new_branch')}</span>
                   </button>
                 )}
               </div>
@@ -174,16 +176,16 @@ export function Sidebar() {
         <div className="sync-row">
           <button className="btn-primary" onClick={handlePush} disabled={pushing}>
             <i className={`ti ${pushing ? 'ti-loader-2' : 'ti-cloud-upload'}`} />
-            {pushing ? '推送中…' : '推送到云'}
+            {pushing ? t('sidebar.pushing') : t('sidebar.push')}
             {ahead > 0 && <span className="badge">{ahead}</span>}
           </button>
-          <button className="btn-icon" title="拉取并合并" onClick={handlePull} disabled={pulling}>
+          <button className="btn-icon" title={t('sidebar.pull_tooltip')} onClick={handlePull} disabled={pulling}>
             <i className={`ti ${pulling ? 'ti-loader-2' : 'ti-download'}`} />
             {behind > 0 && <span className="badge warn">{behind}</span>}
           </button>
           <button
             className="btn-icon"
-            title="只拉取远程引用（不合并）"
+            title={t('sidebar.fetch_tooltip')}
             onClick={async () => { setFetching(true); await fetchAll(false); setFetching(false) }}
             disabled={fetching}
           >
@@ -191,7 +193,7 @@ export function Sidebar() {
           </button>
           <button
             className="btn-icon"
-            title="暂时搁置 / 已搁置列表"
+            title={t('sidebar.stash_tooltip')}
             onClick={() => setStashOpen(true)}
           >
             <i className="ti ti-archive" />
@@ -199,7 +201,7 @@ export function Sidebar() {
           </button>
           <button
             className="btn-icon"
-            title="时光机 · 查看并回到任意一步"
+            title={t('sidebar.reflog_tooltip')}
             onClick={() => setReflogOpen(true)}
           >
             <i className="ti ti-history" />
@@ -219,24 +221,24 @@ export function Sidebar() {
               <span className="commit-context-sha">{selectedCommit.shortId}</span>
               <span className="commit-context-msg">{selectedCommit.message}</span>
             </div>
-            <button className="commit-context-clear" title="退出查看" onClick={() => selectCommit(null)}>
+            <button className="commit-context-clear" title={t('sidebar.exit_view')} onClick={() => selectCommit(null)}>
               <i className="ti ti-x" />
             </button>
           </div>
 
           {commitFiles.length > 0 && (
             <>
-              <div className="section-label">提交变更 · {commitFiles.length} 个文件</div>
+              <div className="section-label">{t('sidebar.commit_changes')} · {commitFiles.length} {t('common.files_word')}</div>
               <div className="file-list">
                 <div
                   className={`file-item file-item-all ${selectedFile === null ? 'selected' : ''}`}
                   onClick={() => viewAllInCommit()}
-                  title="把整个 commit 的所有文件改动汇总在右边看"
+                  title={t('sidebar.view_all_changes')}
                 >
                   <span className="fbadge status-all"><i className="ti ti-files" /></span>
                   <div className="file-info">
-                    <span className="file-name">查看全部改动</span>
-                    <span className="file-path">{commitFiles.length} 个文件汇总</span>
+                    <span className="file-name">{t('sidebar.view_all_changes')}</span>
+                    <span className="file-path">{commitFiles.length} {t('sidebar.files_summary')}</span>
                   </div>
                 </div>
                 {commitFiles.map(f => (
@@ -257,7 +259,7 @@ export function Sidebar() {
 
           {files.length > 0 && (
             <>
-              <div className="section-label section-label-sep">工作区改动 · {files.length} 个文件</div>
+              <div className="section-label section-label-sep">{t('sidebar.workspace_changes')} · {files.length} {t('common.files_word')}</div>
               <div className="file-list">
                 {unstagedFiles.map(f => (
                   <div
@@ -270,12 +272,12 @@ export function Sidebar() {
                       <span className="file-name">{f.path.split('/').pop()}</span>
                     </div>
                     <div className="file-actions">
-                      <button className="file-action-btn" title="暂存"
+                      <button className="file-action-btn" title={t('sidebar.stage')}
                         onClick={e => { e.stopPropagation(); stageFile(f.path) }}>
                         <i className="ti ti-plus" />
                       </button>
                       {f.unstagedStatus !== '?' && (
-                        <button className="file-action-btn danger" title="忽略更改"
+                        <button className="file-action-btn danger" title={t('sidebar.discard')}
                           onClick={e => { e.stopPropagation(); setDiscardTarget(f.path) }}>
                           <i className="ti ti-rotate" />
                         </button>
@@ -293,14 +295,14 @@ export function Sidebar() {
           {files.length === 0 ? (
             <div className="empty-state center">
               <i className="ti ti-circle-check" style={{ fontSize: 36, opacity: 0.15 }} />
-              <p>工作区很干净</p>
-              <span style={{ fontSize: 12 }}>没有未提交的改动</span>
+              <p>{t('sidebar.workspace_clean')}</p>
+              <span style={{ fontSize: 12 }}>{t('sidebar.workspace_clean_sub')}</span>
             </div>
           ) : (
             <>
               {stagedFiles.length > 0 && (
                 <>
-                  <div className="section-label">已暂存 · {stagedFiles.length} 个文件</div>
+                  <div className="section-label">{t('sidebar.staged')} · {stagedFiles.length} {t('common.files_word')}</div>
                   <div className="file-list">
                     {stagedFiles.map(f => (
                       <div
@@ -314,7 +316,7 @@ export function Sidebar() {
                           <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
                         </div>
                         <div className="file-actions">
-                          <button className="file-action-btn" title="取消暂存"
+                          <button className="file-action-btn" title={t('sidebar.unstage')}
                             onClick={e => { e.stopPropagation(); unstageFile(f.path) }}>
                             <i className="ti ti-minus" />
                           </button>
@@ -327,7 +329,7 @@ export function Sidebar() {
 
               {unstagedFiles.length > 0 && (
                 <>
-                  <div className="section-label">未暂存 · {unstagedFiles.length} 个文件</div>
+                  <div className="section-label">{t('sidebar.unstaged')} · {unstagedFiles.length} {t('common.files_word')}</div>
                   <div className="file-list">
                     {unstagedFiles.map(f => (
                       <div
@@ -341,12 +343,12 @@ export function Sidebar() {
                           <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
                         </div>
                         <div className="file-actions">
-                          <button className="file-action-btn" title="暂存"
+                          <button className="file-action-btn" title={t('sidebar.stage')}
                             onClick={e => { e.stopPropagation(); stageFile(f.path) }}>
                             <i className="ti ti-plus" />
                           </button>
                           {f.unstagedStatus !== '?' && (
-                            <button className="file-action-btn danger" title="忽略更改"
+                            <button className="file-action-btn danger" title={t('sidebar.discard')}
                               onClick={e => { e.stopPropagation(); setDiscardTarget(f.path) }}>
                               <i className="ti ti-rotate" />
                             </button>
@@ -360,20 +362,20 @@ export function Sidebar() {
 
               <div className="commit-area">
                 <div className="commit-label-row">
-                  <span className="label">提交说明</span>
+                  <span className="label">{t('sidebar.commit_label')}</span>
                   <button
                     className="ai-btn"
-                    title="根据 staged diff 自动生成提交说明"
+                    title={t('sidebar.ai_generate')}
                     onClick={generateCommitMessage}
                     disabled={aiGenerating}
                   >
                     <i className={`ti ${aiGenerating ? 'ti-loader-2' : 'ti-sparkles'}`} />
-                    {aiGenerating ? '生成中…' : 'AI 生成'}
+                    {aiGenerating ? t('sidebar.ai_generating') : t('sidebar.ai_generate')}
                   </button>
                 </div>
                 <textarea
                   className="commit-input"
-                  placeholder="描述这次改动了什么..."
+                  placeholder={t('sidebar.commit_placeholder')}
                   value={commitMessage}
                   onChange={e => setCommitMessage(e.target.value)}
                   rows={3}
@@ -384,7 +386,7 @@ export function Sidebar() {
                   onClick={saveProgress}
                 >
                   <i className="ti ti-device-floppy" />
-                  {stagedFiles.length === 0 ? '请先暂存文件' : '保存进度'}
+                  {stagedFiles.length === 0 ? t('sidebar.stage_first') : t('sidebar.save_progress')}
                 </button>
               </div>
             </>
@@ -395,7 +397,7 @@ export function Sidebar() {
       {discardTarget && (
         <div className="modal-overlay" onClick={() => setDiscardTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">放弃这个文件的改动？</div>
+            <div className="modal-title">{t('sidebar.discard_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{discardTarget.split('/').pop()}</span>
@@ -403,17 +405,17 @@ export function Sidebar() {
               </div>
               <p className="modal-warn">
                 <i className="ti ti-alert-triangle" />
-                这会丢弃你对这个文件的所有未保存修改，此操作不可撤销。
+                {t('sidebar.discard_warn')}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setDiscardTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setDiscardTarget(null)}>{t('common.cancel')}</button>
               <button className="btn-primary" onClick={() => {
                 const file = discardTarget
                 setDiscardTarget(null)
                 discardFile(file)
               }}>
-                确认放弃
+                {t('sidebar.discard_confirm')}
               </button>
             </div>
           </div>

@@ -189,6 +189,40 @@ export default function App() {
         <div className={`toast toast-${toast.type}`}>
           <i className={`ti ${toast.type === 'success' ? 'ti-circle-check' : 'ti-alert-circle'}`} />
           <span>{toast.message}</span>
+          {toast.type === 'error' && (
+            <button
+              type="button"
+              className="toast-copy"
+              title={t('err.toast_copy_diag')}
+              onClick={async () => {
+                try {
+                  const d = await (await import('@tauri-apps/api/core')).invoke<{
+                    appVersion: string; tauriVersion: string; libgit2Version: string;
+                    gitVersion: string | null; gitLfsVersion: string | null;
+                    os: string; arch: string; currentRepo: string | null;
+                  }>('get_diagnostics', { repoPath: useStore.getState().repoPath })
+                  const report = [
+                    '## Versa 错误报告',
+                    '',
+                    `Error: ${toast.message}`,
+                    '',
+                    `Versa ${d.appVersion} · Tauri ${d.tauriVersion} · libgit2 ${d.libgit2Version}`,
+                    `git: ${d.gitVersion ?? 'not found'} · git-lfs: ${d.gitLfsVersion ?? 'not installed'}`,
+                    `OS: ${d.os} ${d.arch}`,
+                    `repo: ${d.currentRepo ?? '(none)'}`,
+                  ].join('\n')
+                  await navigator.clipboard.writeText(report)
+                  useStore.getState().showToast(t('about.diag_copied'), 'success')
+                } catch (e) {
+                  // Last-resort: just copy the raw message if diagnostics fail.
+                  try { await navigator.clipboard.writeText(toast.message) } catch {}
+                }
+              }}
+            >
+              <i className="ti ti-copy" />
+              {t('err.toast_copy_diag')}
+            </button>
+          )}
         </div>
       )}
       {aiStreaming && (
@@ -238,15 +272,15 @@ export default function App() {
             return (
           <div className={`app-body ${rsVisible ? 'has-right' : ''}`}>
             <nav className="icon-bar">
-              <IconBtn icon="ti-git-commit" tab="changes" label="变更" onClick={() => setSettingsOpen(false)} />
-              <IconBtn icon="ti-git-branch" tab="branches" label="分支" onClick={() => setSettingsOpen(false)} />
+              <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => setSettingsOpen(false)} />
+              <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => setSettingsOpen(false)} />
               <div className="spacer" />
               {inNormalView && (
                 <button
                   className={`icon-btn ${rightSidebarOpen ? 'active' : ''}`}
                   onClick={() => toggleRightSidebar()}
-                  title="右侧面板"
-                  aria-label="切换右侧面板"
+                  title="Right panel"
+                  aria-label="Right panel"
                 >
                   <i className="ti ti-layout-sidebar-right" />
                 </button>
@@ -255,15 +289,15 @@ export default function App() {
                 className={`icon-btn ${terminalOpen ? 'active' : ''}`}
                 onClick={() => useStore.getState().setTerminalOpen(!terminalOpen)}
                 title="Terminal (⌘`)"
-                aria-label="切换 Terminal"
+                aria-label={t('cheatsheet.toggle_terminal')}
               >
                 <i className="ti ti-terminal-2" />
                 {terminalOpen && <span className="status-dot" />}
               </button>
               <button
                 className={`icon-btn ${settingsOpen ? 'active' : ''}`}
-                title="设置"
-                aria-label="设置"
+                title={t('common.settings')}
+                aria-label={t('common.settings')}
                 onClick={() => setSettingsOpen(v => !v)}
               >
                 <i className="ti ti-settings" />

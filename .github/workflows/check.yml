@@ -1,0 +1,45 @@
+# Lightweight checks — typecheck the frontend and run Rust clippy/tests.
+# This runs on every push/PR; the heavier build.yml only kicks off on main /
+# tags / explicit dispatch.
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - name: typecheck
+        run: npx tsc --noEmit
+      - name: tests
+        run: npm test --if-present
+
+  backend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy }
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri -> target }
+      - name: install linux deps for git2/tauri builds
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+      - name: clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: tests
+        working-directory: src-tauri
+        run: cargo test --all-features
