@@ -1,35 +1,17 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7ab02b" />
-      <stop offset="1" stop-color="#4d7a1a" />
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="14" />
-    </filter>
-  </defs>
+  <!-- Versa app mark: two converging git branches forming a V.
+       Transparent background; left stroke is brand green, right stroke is
+       neutral dark. Matches the welcome-screen Logo component. -->
 
-  <!-- App icon background: rounded square, brand-green gradient.
-       Corner radius ~22% matches Apple's macOS icon shape. -->
-  <rect width="1024" height="1024" rx="224" ry="224" fill="url(#bg)" />
+  <!-- Left branch — Versa green -->
+  <path d="M 280 256 L 512 800"
+        stroke="#639922" stroke-width="112"
+        stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <circle cx="280" cy="256" r="96" fill="#639922" />
 
-  <!-- Subtle inner highlight so the icon doesn't look flat. -->
-  <rect width="1024" height="1024" rx="224" ry="224"
-        fill="white" opacity="0.06" />
-
-  <!-- Soft glow behind the mark, for a tiny bit of depth. -->
-  <g filter="url(#glow)" opacity="0.35">
-    <path d="M 320 296 L 512 808 L 704 296"
-          stroke="white" stroke-width="100" fill="none"
-          stroke-linecap="round" stroke-linejoin="round" />
-  </g>
-
-  <!-- The V — two converging branches meeting at the bottom apex. -->
-  <path d="M 320 296 L 512 808 L 704 296"
-        stroke="white" stroke-width="92" fill="none"
-        stroke-linecap="round" stroke-linejoin="round" />
-
-  <!-- Top commit dots, framing the two endpoints. -->
-  <circle cx="320" cy="296" r="78" fill="white" />
-  <circle cx="704" cy="296" r="78" fill="white" />
+  <!-- Right branch — neutral dark -->
+  <path d="M 744 256 L 512 800"
+        stroke="#1a1a18" stroke-width="112"
+        stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <circle cx="744" cy="256" r="96" fill="#1a1a18" />
 </svg>
