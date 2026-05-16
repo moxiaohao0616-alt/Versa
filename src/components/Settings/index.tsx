@@ -4,7 +4,7 @@ import { useStore } from '../../store'
 import type { AIProvider, RemoteInfo, LfsStatus, LfsPattern, LfsFile } from '../../store'
 import { AboutModal } from '../About'
 import { CheatsheetModal } from '../Cheatsheet'
-import { setLanguage } from '../../i18n'
+import i18nInstance, { setLanguage } from '../../i18n'
 
 type Theme = 'light' | 'dark' | 'system'
 
@@ -342,16 +342,16 @@ async function handleImportSettings() {
       const text = await file.text()
       const parsed = JSON.parse(text)
       const bag: unknown = parsed?.data
-      if (!bag || typeof bag !== 'object') throw new Error('文件结构不对：缺少 data 字段')
+      if (!bag || typeof bag !== 'object') throw new Error(i18nInstance.t('settings.file_struct_err') as string)
       const entries = Object.entries(bag as Record<string, unknown>)
       const safe = entries.filter(([k, v]) => k.startsWith('versa:') && typeof v === 'string')
-      if (safe.length === 0) throw new Error('文件里没有 versa:* 的设置键')
-      const ok = window.confirm(`即将覆盖 ${safe.length} 项本机设置。继续？`)
+      if (safe.length === 0) throw new Error(i18nInstance.t('settings.no_versa_keys') as string)
+      const ok = window.confirm(i18nInstance.t('settings.importing_warn', { count: safe.length }) as string)
       if (!ok) return
       for (const [k, v] of safe) localStorage.setItem(k, v as string)
       window.location.reload()
     } catch (e) {
-      useStore.getState().showToast(`导入失败：${String(e)}`, 'error')
+      useStore.getState().showToast(i18nInstance.t('settings.import_fail', { reason: String(e) }) as string, 'error')
     }
   }
   input.click()
@@ -360,6 +360,7 @@ async function handleImportSettings() {
 // ── Remotes sub-page ──────────────────────────────────────────────────────
 
 function RemotesSettings({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation()
   const { listRemotes, addRemote, removeRemote, renameRemote, setRemoteUrl, showToast } = useStore()
   const [remotes, setRemotes] = useState<RemoteInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -413,15 +414,15 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
           <i className="ti ti-chevron-left" />
           <span>Settings</span>
         </button>
-        <h2 className="settings-page-title settings-subpage-title">远程仓库</h2>
+        <h2 className="settings-page-title settings-subpage-title">{t('settings.remotes_title')}</h2>
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">已配置</p>
+        <p className="settings-section-title">{t('settings.remotes_configured')}</p>
         {loading ? (
-          <p className="rs-empty">加载中…</p>
+          <p className="rs-empty">{t('settings.remotes_loading')}</p>
         ) : remotes.length === 0 ? (
-          <p className="rs-empty">还没有添加 remote</p>
+          <p className="rs-empty">{t('settings.remotes_empty')}</p>
         ) : (
           <div className="remote-list">
             {remotes.map(r => (
@@ -441,8 +442,8 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
                       onChange={e => setEditUrl(e.target.value)}
                       placeholder={r.url}
                     />
-                    <button className="ct-btn" onClick={() => handleSave(r.name)}>保存</button>
-                    <button className="ct-btn" onClick={() => setEditing(null)}>取消</button>
+                    <button className="ct-btn" onClick={() => handleSave(r.name)}>{t('settings.btn_save')}</button>
+                    <button className="ct-btn" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
                   </>
                 ) : (
                   <>
@@ -452,9 +453,9 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
                       className="ct-btn"
                       onClick={() => { setEditing(r.name); setEditName(r.name); setEditUrl(r.url) }}
                     >
-                      编辑
+                      {t('settings.btn_edit')}
                     </button>
-                    <button className="ct-btn danger" onClick={() => handleDelete(r.name)}>删除</button>
+                    <button className="ct-btn danger" onClick={() => handleDelete(r.name)}>{t('common.delete')}</button>
                   </>
                 )}
               </div>
@@ -464,27 +465,27 @@ function RemotesSettings({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">新增</p>
+        <p className="settings-section-title">{t('settings.remotes_add_section')}</p>
         <div className="remote-row">
           <input
             className="settings-input"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            placeholder="名称（如 origin / upstream）"
+            placeholder={t('settings.remote_name_placeholder')}
             style={{ width: 180 }}
           />
           <input
             className="settings-input"
             value={newUrl}
             onChange={e => setNewUrl(e.target.value)}
-            placeholder="URL（git@github.com:user/repo.git 或 https://…）"
+            placeholder={t('settings.remote_url_placeholder')}
           />
           <button
             className="ct-btn"
             onClick={handleAdd}
             disabled={!newName.trim() || !newUrl.trim()}
           >
-            添加
+            {t('settings.btn_add')}
           </button>
         </div>
       </div>
@@ -508,16 +509,15 @@ function AISettings({ onBack }: { onBack: () => void }) {
           <i className="ti ti-chevron-left" />
           <span>Settings</span>
         </button>
-        <h2 className="settings-page-title settings-subpage-title">AI 服务商</h2>
+        <h2 className="settings-page-title settings-subpage-title">{t('settings.ai_title')}</h2>
       </div>
 
       <p className="settings-subpage-hint">
-        AI 用于"生成 commit message""解释提交""分析冲突"等。
-        API Key 只保存在本机的 localStorage，不会上传到 Versa 的服务器。
+        {t('settings.privacy_note')}
       </p>
 
       <div className="settings-section">
-        <p className="settings-section-title">服务商</p>
+        <p className="settings-section-title">{t('settings.ai_subtitle')}</p>
         <div className="provider-grid">
           {PROVIDERS.map(p => (
             <button
@@ -535,12 +535,12 @@ function AISettings({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="settings-section">
-        <p className="settings-section-title">凭证</p>
+        <p className="settings-section-title">{t('settings.ai_credentials')}</p>
 
         <div className="settings-row settings-row-stack">
           <div>
-            <p className="settings-row-label">API Key</p>
-            <p className="settings-row-desc">从服务商控制台复制过来</p>
+            <p className="settings-row-label">{t('settings.api_key_label')}</p>
+            <p className="settings-row-desc">{t('settings.api_key_desc')}</p>
           </div>
           <div className="settings-input-wrap">
             <input
@@ -555,7 +555,7 @@ function AISettings({ onBack }: { onBack: () => void }) {
             <button
               className="settings-input-toggle"
               onClick={() => setShowKey(v => !v)}
-              title={showKey ? '隐藏' : '显示'}
+              title={showKey ? '' : ''}
               type="button"
             >
               <i className={`ti ${showKey ? 'ti-eye-off' : 'ti-eye'}`} />
@@ -565,9 +565,11 @@ function AISettings({ onBack }: { onBack: () => void }) {
 
         <div className="settings-row settings-row-stack">
           <div>
-            <p className="settings-row-label">模型</p>
+            <p className="settings-row-label">{t('settings.model_label')}</p>
             <p className="settings-row-desc">
-              留空使用默认（{meta.defaultModel || '本服务商无默认，必须填写'}）
+              {meta.defaultModel
+                ? t('settings.model_desc_default', { model: meta.defaultModel })
+                : t('settings.model_desc_no_default')}
             </p>
           </div>
           <input
@@ -584,8 +586,8 @@ function AISettings({ onBack }: { onBack: () => void }) {
         {!meta.hasPresetBaseUrl && (
           <div className="settings-row settings-row-stack">
             <div>
-              <p className="settings-row-label">Base URL</p>
-              <p className="settings-row-desc">例如 https://your-host/v1（需要兼容 OpenAI Chat Completions）</p>
+              <p className="settings-row-label">{t('settings.base_url_label')}</p>
+              <p className="settings-row-desc">{t('settings.base_url_desc')}</p>
             </div>
             <input
               className="settings-input"
