@@ -34,12 +34,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macOS-latest runners are arm64. We build for the host arch only
+          # (a single .dmg / .app.tar.gz). Intel users get the arm64 build via
+          # Rosetta; a universal-binary build can be added later if needed.
           - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
+            args: ''
             label: macos-arm64
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
-            label: macos-x64
           - platform: ubuntu-22.04
             args: ''
             label: linux-x64
@@ -60,8 +60,6 @@ jobs:
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: rust cache
         uses: swatinem/rust-cache@v2
