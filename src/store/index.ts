@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import i18n from '../i18n'
+
+// Shorthand to call i18n outside React components (store actions etc.). Falls
+// back to the key if translation is missing so we never show literal interp
+// placeholders to users.
+const tt = (k: string, opts?: Record<string, unknown>) => i18n.t(k, opts) as string
 
 /** Subscribe to streaming AI deltas while the given command runs. Returns a
  *  cleanup that unlistens. Provider-agnostic.
@@ -914,13 +920,13 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       if (repoStatus.files.length > 0) {
         const msg = commitMessage.trim() ||
-          `保存进度 · ${new Date().toLocaleString('zh-CN', { hour12: false })}`
+          `${tt('toast.save_progress_default')} · ${new Date().toLocaleString(i18n.language.startsWith('en') ? 'en-US' : 'zh-CN', { hour12: false })}`
         await invoke('save_progress', { path: repoPath, message: msg })
         if (commitMessage.trim()) set({ commitMessage: '' })
       }
       await invoke('git_push', { path: repoPath, branch: repoStatus.branch })
       await get().refreshRepo()
-      showToast('推送成功', 'success')
+      showToast(tt('toast.push_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -932,7 +938,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('git_pull', { path: repoPath })
       await get().refreshRepo()
-      showToast('拉取成功', 'success')
+      showToast(tt('toast.pull_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -944,7 +950,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('git_fetch', { path: repoPath, remote: null, prune })
       await get().refreshRepo()
-      showToast('已拉取最新引用（未合并）', 'success')
+      showToast(tt('toast.fetch_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -955,8 +961,8 @@ export const useStore = create<VersaState>((set, get) => ({
     if (!repoPath) return
     await invoke('reset_to_commit', { path: repoPath, sha, mode })
     await get().refreshRepo()
-    const label = mode === 'soft' ? '软回退' : mode === 'mixed' ? '混合回退' : '硬回退'
-    showToast(`${label}到 ${sha.slice(0, 7)} 完成`, 'success')
+    const label = mode === 'soft' ? tt('toast.reset_soft') : mode === 'mixed' ? tt('toast.reset_mixed') : tt('toast.reset_hard')
+    showToast(tt('toast.reset_done', { mode: label, short: sha.slice(0, 7) }), 'success')
   },
 
   // ── Remotes ──────────────────────────────────────────────────────────
@@ -996,25 +1002,25 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('create_tag', { path: repoPath, name, target, message })
-    showToast(`标签 ${name} 已创建`, 'success')
+    showToast(tt('toast.tag_created', { name }), 'success')
   },
   deleteLocalTag: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('delete_tag', { path: repoPath, name })
-    showToast(`标签 ${name} 已删除`, 'success')
+    showToast(tt('toast.tag_deleted', { name }), 'success')
   },
   pushTag: async (remote, tag) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('push_tag', { path: repoPath, remote, tag })
-    showToast(`标签 ${tag} 已推送到 ${remote}`, 'success')
+    showToast(tt('toast.tag_pushed', { tag, remote }), 'success')
   },
   deleteRemoteTag: async (remote, tag) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('delete_remote_tag', { path: repoPath, remote, tag })
-    showToast(`已从 ${remote} 删除标签 ${tag}`, 'success')
+    showToast(tt('toast.tag_remote_deleted', { remote, tag }), 'success')
   },
 
   // ── Reflog (时光机) ─────────────────────────────────────────────────
@@ -1028,7 +1034,7 @@ export const useStore = create<VersaState>((set, get) => ({
     if (!repoPath) return
     await invoke('restore_to_reflog', { path: repoPath, sha })
     await get().refreshRepo()
-    showToast(`已回到 ${sha.slice(0, 7)}`, 'success')
+    showToast(tt('toast.reflog_restored', { short: sha.slice(0, 7) }), 'success')
   },
 
   // ── Hunk staging ─────────────────────────────────────────────────────
@@ -1062,38 +1068,38 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('add_submodule', { path: repoPath, url, subPath })
-    showToast(`已添加子模块 ${subPath}`, 'success')
+    showToast(tt('toast.submodule_added', { path: subPath }), 'success')
     await get().refreshRepo()
   },
   initSubmodule: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('init_submodule', { path: repoPath, name })
-    showToast(`已初始化 ${name}`, 'success')
+    showToast(tt('toast.submodule_initialized', { name }), 'success')
   },
   updateSubmodule: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('update_submodule', { path: repoPath, name })
-    showToast(`已更新 ${name}`, 'success')
+    showToast(tt('toast.submodule_updated', { name }), 'success')
   },
   syncSubmodule: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('sync_submodule', { path: repoPath, name })
-    showToast(`已同步 ${name} 的 URL`, 'success')
+    showToast(tt('toast.submodule_synced', { name }), 'success')
   },
   deinitSubmodule: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('deinit_submodule', { path: repoPath, name })
-    showToast(`已 deinit ${name}`, 'success')
+    showToast(tt('toast.submodule_deinit_ok', { name }), 'success')
   },
   removeSubmodule: async (name) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('remove_submodule', { path: repoPath, name })
-    showToast(`已彻底移除 ${name}`, 'success')
+    showToast(tt('toast.submodule_removed', { name }), 'success')
     await get().refreshRepo()
   },
 
@@ -1110,13 +1116,13 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('lfs_track', { path: repoPath, pattern })
-    showToast(`LFS 已追踪 ${pattern}`, 'success')
+    showToast(tt('toast.lfs_track_ok', { pattern }), 'success')
   },
   lfsUntrack: async (pattern) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('lfs_untrack', { path: repoPath, pattern })
-    showToast(`LFS 已取消追踪 ${pattern}`, 'success')
+    showToast(tt('toast.lfs_untrack_ok', { pattern }), 'success')
   },
   lfsLsFiles: async () => {
     const { repoPath } = get()
@@ -1127,13 +1133,13 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('lfs_pull', { path: repoPath })
-    showToast('LFS 对象已拉取', 'success')
+    showToast(tt('toast.lfs_pull_ok'), 'success')
   },
   lfsFetch: async () => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
     await invoke('lfs_fetch', { path: repoPath })
-    showToast('LFS 对象已下载', 'success')
+    showToast(tt('toast.lfs_fetch_ok'), 'success')
   },
 
   cloneRepo: async (url: string, dest: string) => {
@@ -1148,7 +1154,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('checkout_commit', { path: repoPath, id })
       await get().refreshRepo()
       if (info) await get().selectCommit(info)
-      showToast('已切换到该提交', 'success')
+      showToast(tt('toast.checkout_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1214,7 +1220,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('abort_merge', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('已放弃合并', 'success')
+      showToast(tt('toast.merge_abort_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1227,7 +1233,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('continue_merge', { path: repoPath, message })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('合并完成', 'success')
+      showToast(tt('toast.merge_done'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1240,7 +1246,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('abort_rebase', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('已放弃 rebase', 'success')
+      showToast(tt('toast.rebase_abort_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1257,7 +1263,7 @@ export const useStore = create<VersaState>((set, get) => ({
       // The state machine + watcher will surface whichever.
       const { repoStatus } = get()
       showToast(
-        repoStatus?.state === 'rebasing' ? '已继续，遇到了下一段冲突' : 'rebase 完成',
+        repoStatus?.state === 'rebasing' ? tt('toast.rebase_next_conflict') : tt('toast.rebase_done'),
         'success'
       )
     } catch (e) {
@@ -1271,7 +1277,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('revert_commit', { path: repoPath, sha, message })
       await get().refreshRepo()
-      showToast('已撤销该提交', 'success')
+      showToast(tt('toast.revert_done'), 'success')
     } catch (e) {
       // Conflict will surface via state change → ConflictView; toast still informs.
       showToast(String(e), 'error')
@@ -1286,7 +1292,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('abort_revert', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('已放弃撤销', 'success')
+      showToast(tt('toast.revert_abort_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1299,7 +1305,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('continue_revert', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('撤销已完成', 'success')
+      showToast(tt('toast.revert_continue_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1311,7 +1317,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('cherry_pick_commit', { path: repoPath, sha, message })
       await get().refreshRepo()
-      showToast('已拣选该提交', 'success')
+      showToast(tt('toast.cherry_done'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
       await get().refreshRepo()
@@ -1325,7 +1331,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('abort_cherry_pick', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('已放弃拣选', 'success')
+      showToast(tt('toast.cherry_abort_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1338,7 +1344,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('continue_cherry_pick', { path: repoPath })
       set({ conflicts: [], selectedConflictFile: null, conflictContent: null })
       await get().refreshRepo()
-      showToast('拣选已完成', 'success')
+      showToast(tt('toast.cherry_continue_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1361,7 +1367,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('create_stash', { path: repoPath, message })
       await get().refreshRepo()
-      showToast('已搁置当前改动', 'success')
+      showToast(tt('toast.stash_created'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1373,7 +1379,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('apply_stash', { path: repoPath, index })
       await get().refreshRepo()
-      showToast('已应用搁置（仍保留在列表中）', 'success')
+      showToast(tt('toast.stash_applied'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
       // Stash list may have changed (or workdir may now have conflict markers)
@@ -1387,7 +1393,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('pop_stash', { path: repoPath, index })
       await get().refreshRepo()
-      showToast('已应用并删除该搁置', 'success')
+      showToast(tt('toast.stash_popped'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
       // On conflict, git keeps the stash in the list — refresh to reflect that
@@ -1505,7 +1511,7 @@ export const useStore = create<VersaState>((set, get) => ({
       })
       set({ bisectStatus: s })
       await get().refreshRepo()
-      showToast('已开始二分查找', 'success')
+      showToast(tt('toast.bisect_started'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1518,7 +1524,7 @@ export const useStore = create<VersaState>((set, get) => ({
       const s = await invoke<BisectStatus>('bisect_mark', { path: repoPath, kind })
       set({ bisectStatus: s })
       if (s.kind === 'found') {
-        showToast('找到了第一个出问题的提交', 'success')
+        showToast(tt('toast.bisect_found'), 'success')
       }
     } catch (e) {
       showToast(String(e), 'error')
@@ -1532,7 +1538,7 @@ export const useStore = create<VersaState>((set, get) => ({
       await invoke('bisect_reset', { path: repoPath })
       set({ bisectStatus: null })
       await get().refreshRepo()
-      showToast('已停止查找', 'success')
+      showToast(tt('toast.bisect_stopped'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1542,7 +1548,7 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, aiConfig } = get()
     if (!repoPath) throw new Error('no repo open')
     if (!aiConfig.apiKey.trim()) {
-      throw new Error('还没配置 AI，请到设置里填上 API Key')
+      throw new Error(tt('toast.ai_not_configured'))
     }
     return await invoke<BisectSuggestion>('ai_suggest_bisect_good', {
       provider: aiConfig.provider,
@@ -1594,7 +1600,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('checkout_remote_branch', { path: repoPath, fullName })
       await get().refreshRepo()
-      showToast(`已切到 ${fullName.split('/').slice(1).join('/')}`, 'success')
+      showToast(tt('toast.checkout_ok'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1606,7 +1612,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('rename_branch', { path: repoPath, oldName, newName })
       await get().refreshRepo()
-      showToast(`已重命名为 ${newName}`, 'success')
+      showToast(tt('toast.branch_renamed', { name: newName }), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1618,7 +1624,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('delete_branch', { path: repoPath, name, force })
       await get().refreshRepo()
-      showToast(`已删除分支 ${name}`, 'success')
+      showToast(tt('toast.branch_deleted', { name }), 'success')
     } catch (e) {
       // Re-throw so caller can react (e.g. show "force?" option on "not fully merged")
       showToast(String(e), 'error')
@@ -1632,7 +1638,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('delete_remote_branch', { path: repoPath, fullName })
       await get().refreshRepo()
-      showToast(`已删除远程分支 ${fullName}`, 'success')
+      showToast(tt('toast.branch_deleted_remote', { name: fullName }), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1648,7 +1654,7 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, aiConfig } = get()
     if (!repoPath) throw new Error('no repo open')
     if (!aiConfig.apiKey.trim()) {
-      throw new Error('还没配置 AI，请到设置里填上 API Key')
+      throw new Error(tt('toast.ai_not_configured'))
     }
     return await invoke<MergeRiskReport>('ai_analyze_merge_risk', {
       provider: aiConfig.provider,
@@ -1664,7 +1670,7 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, aiConfig } = get()
     if (!repoPath) throw new Error('no repo open')
     if (!aiConfig.apiKey.trim()) {
-      throw new Error('还没配置 AI，请到设置里填上 API Key')
+      throw new Error(tt('toast.ai_not_configured'))
     }
     return await withAIStream(
       'ai_analyze_file_conflict',
@@ -1691,9 +1697,9 @@ export const useStore = create<VersaState>((set, get) => ({
       // After merge: clean (commit landed) or 'merging' (conflicts — ConflictView takes over)
       const { repoStatus } = get()
       if (repoStatus?.state === 'merging') {
-        showToast('合并遇到冲突，已切到冲突视图', 'success')
+        showToast(tt('toast.merge_conflict_switch'), 'success')
       } else {
-        showToast(`已合并 ${target}`, 'success')
+        showToast(tt('toast.merge_branch_ok', { branch: target }), 'success')
       }
     } catch (e) {
       showToast(String(e), 'error')
@@ -1708,7 +1714,7 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       await invoke('drop_stash', { path: repoPath, index })
       await get().refreshRepo()
-      showToast('已删除该搁置', 'success')
+      showToast(tt('toast.stash_dropped'), 'success')
     } catch (e) {
       showToast(String(e), 'error')
     }
@@ -1718,7 +1724,7 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, aiConfig, selectedConflictFile, conflictContent, showToast } = get()
     if (!repoPath || !selectedConflictFile || !conflictContent) return
     if (!aiConfig.apiKey.trim()) {
-      showToast('还没配置 AI，请到设置里填上 API Key', 'error')
+      showToast(tt('toast.ai_not_configured'), 'error')
       return
     }
     const hunk = conflictContent.hunks[hunkIdx]
@@ -1753,7 +1759,7 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, selectedCommit, aiConfig, showToast } = get()
     if (!repoPath || !selectedCommit) return
     if (!aiConfig.apiKey.trim()) {
-      showToast('还没配置 AI，请到设置里填上 API Key', 'error')
+      showToast(tt('toast.ai_not_configured'), 'error')
       return
     }
     const sha = selectedCommit.id
@@ -1768,7 +1774,7 @@ export const useStore = create<VersaState>((set, get) => ({
       })
       const diffText = diffsToUnifiedText(diffs)
       if (!diffText.trim()) {
-        showToast('这个提交没有可分析的内容', 'error')
+        showToast(tt('toast.commit_empty'), 'error')
         set({ commitExplanation: null })
         return
       }
@@ -1842,11 +1848,11 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, repoStatus, aiConfig, showToast } = get()
     if (!repoPath) return
     if (!aiConfig.apiKey.trim()) {
-      showToast('还没配置 AI，请到设置里填上 API Key', 'error')
+      showToast(tt('toast.ai_not_configured'), 'error')
       return
     }
     if (!repoStatus || repoStatus.files.length === 0) {
-      showToast('没有改动可以生成说明', 'error')
+      showToast(tt('toast.no_diff_to_explain'), 'error')
       return
     }
 
@@ -1867,7 +1873,7 @@ export const useStore = create<VersaState>((set, get) => ({
       })
       const diffText = diffsToUnifiedText(diffs)
       if (!diffText.trim()) {
-        showToast('没有可分析的 diff', 'error')
+        showToast(tt('toast.no_diff'), 'error')
         set({ commitMessage: original })
         return
       }
