@@ -45,7 +45,7 @@ export function WelcomeScreen({ onOpen }: Props) {
       <div className="welcome-inner">
         <Logo size={88} className="welcome-logo" />
         <h1 className="welcome-title">Versa</h1>
-        <p className="welcome-sub">Git for Everyone</p>
+        <p className="welcome-sub">{t('app.tagline')}</p>
         <div className="welcome-actions">
           <button className="btn-primary large" onClick={onOpen}>
             <i className="ti ti-folder-open" />

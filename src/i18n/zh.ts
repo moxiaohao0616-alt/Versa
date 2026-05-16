@@ -4,7 +4,7 @@
 export const zh = {
   app: {
     title: 'Versa',
-    tagline: 'Git for Everyone',
+    tagline: 'Easy Git for Everyone',
   },
   common: {
     open: '打开',

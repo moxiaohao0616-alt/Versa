@@ -3,7 +3,7 @@ import type { Translations } from './zh'
 export const en: Translations = {
   app: {
     title: 'Versa',
-    tagline: 'Git for Everyone',
+    tagline: 'Easy Git for Everyone',
   },
   common: {
     open: 'Open',
