@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -34,7 +34,7 @@ pub fn start(app: AppHandle, registry: &WatcherRegistry, path: String) -> Result
             // If every path in the event is noise, drop it. Common case: a
             // `git commit` writes many objects under `.git/objects/` — we
             // don't want to refresh for each one.
-            if event.paths.iter().all(is_ignored_path) {
+            if event.paths.iter().all(|p| is_ignored_path(p.as_path())) {
                 return;
             }
 
@@ -58,7 +58,7 @@ pub fn stop(registry: &WatcherRegistry, path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn is_ignored_path(p: &PathBuf) -> bool {
+fn is_ignored_path(p: &Path) -> bool {
     let s = p.to_string_lossy();
     s.contains("/.git/objects/")
         || s.contains("/.git/logs/")

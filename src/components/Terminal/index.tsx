@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Terminal as XTerm, ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -41,6 +42,7 @@ function xtermTheme(): ITheme {
 }
 
 export function Terminal() {
+  const { t } = useTranslation()
   const { repoPath, setTerminalOpen, theme } = useStore()
   const pendingCmd = useStore(s => s.pendingTerminalCommand)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -282,13 +284,13 @@ export function Terminal() {
       />
       <div className="term-header">
         <span className="term-dot" />
-        <span className="term-title">Terminal</span>
+        <span className="term-title">{t('terminal.header')}</span>
         <span className="term-path">{repoPath}</span>
         <div className="term-actions">
-          <button className="term-btn" onClick={() => xtermRef.current?.clear()} title="清空">
+          <button className="term-btn" onClick={() => xtermRef.current?.clear()} title={t('common.refresh')}>
             <i className="ti ti-eraser" />
           </button>
-          <button className="term-btn" onClick={() => setTerminalOpen(false)} title="收起 (⌘`)">
+          <button className="term-btn" onClick={() => setTerminalOpen(false)} title={t('common.close')}>
             <i className="ti ti-chevron-down" />
           </button>
         </div>

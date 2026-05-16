@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 
 export function TabStrip() {
+  const { t } = useTranslation()
   const { tabs, repoPath, switchTab, closeTab, openRepo, recentRepos } = useStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -43,20 +45,20 @@ export function TabStrip() {
   return (
     <div className="tabstrip">
       <div className="tabstrip-tabs">
-        {tabs.map(t => (
+        {tabs.map(tab => (
           <button
-            key={t.path}
-            className={`tab ${repoPath === t.path ? 'active' : ''}`}
-            onClick={() => switchTab(t.path)}
-            title={t.path}
+            key={tab.path}
+            className={`tab ${repoPath === tab.path ? 'active' : ''}`}
+            onClick={() => switchTab(tab.path)}
+            title={tab.path}
           >
             <i className="ti ti-folder" />
-            <span className="tab-name">{t.name}</span>
+            <span className="tab-name">{tab.name}</span>
             <span
               className="tab-close"
               role="button"
-              aria-label="关闭"
-              onClick={e => handleCloseTab(e, t.path)}
+              aria-label={t('tabstrip.close_tab')}
+              onClick={e => handleCloseTab(e, tab.path)}
             >
               <i className="ti ti-x" />
             </span>
@@ -68,8 +70,8 @@ export function TabStrip() {
         <button
           className="tab-add"
           onClick={() => setMenuOpen(v => !v)}
-          title="打开仓库"
-          aria-label="打开仓库"
+          title={t('tabstrip.add_tab')}
+          aria-label={t('tabstrip.add_tab')}
         >
           <i className="ti ti-plus" />
         </button>
@@ -77,12 +79,12 @@ export function TabStrip() {
           <div className="tab-add-menu">
             <button className="tab-add-item primary" onClick={handleOpenNew}>
               <i className="ti ti-folder-open" />
-              <span>打开新项目…</span>
+              <span>{t('tabstrip.open_new')}</span>
             </button>
             {recentNotOpen.length > 0 && (
               <>
                 <div className="tab-add-divider" />
-                <div className="tab-add-section">最近打开</div>
+                <div className="tab-add-section">{t('tabstrip.recent')}</div>
                 {recentNotOpen.map(r => (
                   <button
                     key={r.path}

@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore, type BranchInfo, type TagInfo, type SubmoduleInfo } from '../../store'
 import { MergeModal } from '../Merge'
-
-function relTime(ts: number): string {
-  if (ts === 0) return ''
-  const s = Math.floor(Date.now() / 1000 - ts)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
-  if (s < 86400 * 30) return `${Math.floor(s / 86400)} 天前`
-  return new Date(ts * 1000).toLocaleDateString('zh-CN')
-}
+import { relTime } from '../../lib/relTime'
 
 export function BranchesView() {
+  const { t } = useTranslation()
   const {
     branches, loadBranches,
     switchBranch, checkoutRemoteBranch,
@@ -108,27 +101,27 @@ export function BranchesView() {
           <input
             type="text"
             value={filter}
-            placeholder="搜索分支…"
+            placeholder={t('sidebar.branch_search')}
             onChange={e => setFilter(e.target.value)}
           />
           {filter && (
             <button
               className="branches-filter-clear"
               onClick={() => setFilter('')}
-              title="清空"
+              title={t('common.close')}
             >
               <i className="ti ti-x" />
             </button>
           )}
         </div>
-        <span className="branches-hint">双击切换 · 右上 ⋮ 操作</span>
+        <span className="branches-hint">{t('branches.hint')}</span>
       </div>
 
       <div className="branches-scroll">
         <BranchList
-          title={`本地分支 · ${local.length}`}
+          title={`${t('branches.title_local')} · ${local.length}`}
           items={local}
-          emptyText="没有匹配的本地分支"
+          emptyText={t('branches.empty_local')}
           menuFor={menuFor}
           setMenuFor={setMenuFor}
           onDoubleClick={(b) => onDoubleClickLocal(b.name, b.isCurrent)}
@@ -137,16 +130,16 @@ export function BranchesView() {
           onMerge={(b) => setMergeTarget(b.name)}
         />
         <BranchList
-          title={`远程分支 · ${remote.length}`}
+          title={`${t('branches.title_remote')} · ${remote.length}`}
           items={remote}
-          emptyText="没有匹配的远程分支"
+          emptyText={t('branches.empty_remote')}
           menuFor={menuFor}
           setMenuFor={setMenuFor}
           onDoubleClick={(b) => checkoutRemoteBranch(b.name)}
           onRename={null}
           onDelete={(b) => setDeleteRemoteTarget(b)}
           onMerge={(b) => setMergeTarget(b.name)}
-          deleteLabel="删除远程"
+          deleteLabel={t('branches.delete_remote')}
         />
         <TagsSection filter={filter} />
         <SubmodulesSection filter={filter} />
@@ -162,7 +155,7 @@ export function BranchesView() {
         return (
           <div className="modal-overlay" onClick={() => setDeleteRemoteTarget(null)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
-              <div className="modal-title">删除远程分支？</div>
+              <div className="modal-title">{t('branches.delete_remote_title')}</div>
               <div className="modal-body">
                 <div className="modal-commit-preview">
                   <i className="ti ti-cloud" />
@@ -186,7 +179,7 @@ export function BranchesView() {
                 />
               </div>
               <div className="modal-footer">
-                <button className="btn-secondary" onClick={() => setDeleteRemoteTarget(null)}>取消</button>
+                <button className="btn-secondary" onClick={() => setDeleteRemoteTarget(null)}>{t('common.cancel')}</button>
                 <button
                   className="btn-primary"
                   disabled={!match}
@@ -197,7 +190,7 @@ export function BranchesView() {
                   }}
                 >
                   <i className="ti ti-trash" />
-                  推送删除
+                  {t('branches.delete_remote')}
                 </button>
               </div>
             </div>
@@ -208,7 +201,7 @@ export function BranchesView() {
       {renameTarget && (
         <div className="modal-overlay" onClick={() => setRenameTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">重命名分支</div>
+            <div className="modal-title">{t('branches.rename_title')}</div>
             <div className="modal-body">
               <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
                 当前名字：<span className="graph-sha">{renameTarget.name}</span>
@@ -222,20 +215,20 @@ export function BranchesView() {
                   if (e.key === 'Enter') handleRename()
                   if (e.key === 'Escape') setRenameTarget(null)
                 }}
-                placeholder="新名字"
+                placeholder={t('common.rename')}
                 spellCheck={false}
                 autoComplete="off"
               />
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setRenameTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setRenameTarget(null)}>{t('common.cancel')}</button>
               <button
                 className="btn-primary"
                 disabled={!newName.trim() || newName.trim() === renameTarget.name}
                 onClick={handleRename}
               >
                 <i className="ti ti-pencil" />
-                确认重命名
+                {t('branches.rename')}
               </button>
             </div>
           </div>
@@ -245,7 +238,7 @@ export function BranchesView() {
       {deleteTarget && (
         <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">删除分支？</div>
+            <div className="modal-title">{t('branches.delete_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <i className="ti ti-git-branch" />
@@ -261,14 +254,14 @@ export function BranchesView() {
                   checked={deleteForce}
                   onChange={e => setDeleteForce(e.target.checked)}
                 />
-                <span>强制删除（即使分支还没合并）</span>
+                <span>{t('branches.force_delete')}</span>
               </label>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setDeleteTarget(null)}>取消</button>
+              <button className="btn-secondary" onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</button>
               <button className="btn-primary" onClick={handleDelete}>
                 <i className="ti ti-trash" />
-                确认删除
+                {t('common.delete')}
               </button>
             </div>
           </div>
@@ -302,8 +295,10 @@ function BranchList({
   title, items, emptyText,
   menuFor, setMenuFor,
   onDoubleClick, onRename, onDelete, onMerge,
-  deleteLabel = '删除',
+  deleteLabel,
 }: BranchListProps) {
+  const { t } = useTranslation()
+  const finalDeleteLabel = deleteLabel ?? t('branches.delete_local')
   const hasAnyAction = !!(onRename || onDelete || onMerge)
   return (
     <section className="branches-section">
@@ -325,14 +320,14 @@ function BranchList({
                 title={
                   menuFor === rowKey
                     ? undefined
-                    : (b.isCurrent ? '当前分支' : (b.isRemote ? '双击在本地创建并切换' : '双击切换到这个分支'))
+                    : (b.isCurrent ? t('branches.tooltip_current') : (b.isRemote ? t('branches.tooltip_remote') : t('branches.tooltip_local')))
                 }
               >
                 <i className={`ti ${b.isCurrent ? 'ti-check' : (b.isRemote ? 'ti-cloud' : 'ti-git-branch')} branch-icon`} />
                 <span className="branch-name">{b.name}</span>
                 {/* Always render upstream + counts cells (empty when missing)
                     so grid columns line up across all rows. */}
-                <span className="branch-upstream" title={b.upstream ? `跟踪 ${b.upstream}` : undefined}>
+                <span className="branch-upstream" title={b.upstream ? b.upstream : undefined}>
                   {b.upstream && !b.isRemote ? `→ ${b.upstream}` : ''}
                 </span>
                 <span className="branch-counts">
@@ -348,8 +343,8 @@ function BranchList({
                       <button
                         className="commit-actions-btn"
                         onClick={() => setMenuFor(menuFor === rowKey ? null : rowKey)}
-                        title="分支操作"
-                        aria-label="分支操作"
+                        title={t('cheatsheet.kebab_desc')}
+                        aria-label={t('cheatsheet.kebab_desc')}
                       >
                         <i className="ti ti-dots-vertical" />
                       </button>
@@ -358,22 +353,22 @@ function BranchList({
                           {onMerge && (
                             <button onClick={() => { setMenuFor(null); onMerge(b) }}>
                               <i className="ti ti-git-merge" />
-                              <span>合并到当前分支</span>
+                              <span>{t('branches.merge_into_current')}</span>
                             </button>
                           )}
                           {onRename && (
                             <button onClick={() => { setMenuFor(null); onRename(b) }}>
                               <i className="ti ti-pencil" />
-                              <span>重命名</span>
+                              <span>{t('branches.rename')}</span>
                             </button>
                           )}
                           {onDelete && (
                             <button
                               onClick={() => { setMenuFor(null); onDelete(b) }}
-                              title={deleteLabel === '删除远程' ? '推送到远程，永久删除该分支' : '从本地删除该分支'}
+                              title={finalDeleteLabel === t('branches.delete_remote') ? t('branches.delete_remote_help') : t('branches.delete_local_help')}
                             >
                               <i className="ti ti-trash" />
-                              <span>{deleteLabel}</span>
+                              <span>{finalDeleteLabel}</span>
                             </button>
                           )}
                         </div>
@@ -393,6 +388,7 @@ function BranchList({
 // ── Tags section ───────────────────────────────────────────────────────
 
 function TagsSection({ filter }: { filter: string }) {
+  const { t } = useTranslation()
   const { listTags, deleteLocalTag, pushTag, deleteRemoteTag, repoPath, showToast } = useStore()
   const [tags, setTags] = useState<TagInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -417,9 +413,9 @@ function TagsSection({ filter }: { filter: string }) {
 
   return (
     <section className="branches-section">
-      <h3 className="branches-section-title">标签 · {filtered.length}</h3>
+      <h3 className="branches-section-title">{t('branches.title_tags')} · {filtered.length}</h3>
       {filtered.length === 0 ? (
-        <div className="branches-empty">没有匹配的标签</div>
+        <div className="branches-empty">{t('branches.empty_tags')}</div>
       ) : (
         <div className="branches-list">
           {filtered.map(t => (
@@ -498,7 +494,7 @@ function TagsSection({ filter }: { filter: string }) {
                 }}
               >
                 <i className="ti ti-trash" />
-                确认删除
+                {t('common.delete')}
               </button>
             </div>
           </div>

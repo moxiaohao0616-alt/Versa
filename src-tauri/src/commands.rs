@@ -501,7 +501,7 @@ fn parse_progress(line: &str) -> GitProgressFrame {
                     inside[slash + 1..].trim().parse::<u64>(),
                 ) {
                     let stage = s[..open].trim();
-                    let percent = if tot > 0 { Some(((cur * 100) / tot) as u32) } else { None };
+                    let percent = (cur * 100).checked_div(tot).map(|v| v as u32);
                     return GitProgressFrame {
                         stage: Some(stage.to_string()),
                         percent,
@@ -970,7 +970,7 @@ async fn run_with_message_editor(
     if out.status.success() {
         Ok(())
     } else {
-        Err(friendly_error(&String::from_utf8_lossy(&out.stderr).trim()))
+        Err(friendly_error(String::from_utf8_lossy(&out.stderr).trim()))
     }
 }
 
@@ -1632,8 +1632,8 @@ pub fn list_branches(path: String) -> Result<Vec<BranchInfo>, String> {
 pub async fn checkout_remote_branch(path: String, full_name: String) -> Result<(), String> {
     // "origin/feat-x" → local "feat-x". Handles names like "origin/release/1.0".
     let local: String = full_name
-        .splitn(2, '/')
-        .nth(1)
+        .split_once('/')
+        .map(|x| x.1)
         .unwrap_or("")
         .to_string();
     if local.is_empty() {
@@ -3005,7 +3005,7 @@ fn get_ahead_behind(repo: &Repository) -> Result<(usize, usize), git2::Error> {
     let local_branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
     let upstream_oid = local_branch.upstream()?.get().target()
         .ok_or_else(|| git2::Error::from_str("upstream has no target"))?;
-    Ok(repo.graph_ahead_behind(local, upstream_oid)?)
+    repo.graph_ahead_behind(local, upstream_oid)
 }
 
 fn repo_state_str(repo: &Repository) -> String {
@@ -3171,7 +3171,7 @@ pub fn rename_remote(path: String, old_name: String, new_name: String) -> Result
     // remote_rename returns problems list (refspecs that couldn't be auto-fixed);
     // we forward them as a warning string when non-empty.
     let problems = repo.remote_rename(&old_name, &new_name).map_err(fe)?;
-    if problems.len() > 0 {
+    if !problems.is_empty() {
         let msgs: Vec<String> = (0..problems.len())
             .filter_map(|i| problems.get(i).map(|s| s.to_string()))
             .collect();

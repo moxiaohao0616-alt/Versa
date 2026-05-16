@@ -1,3 +1,8 @@
+// Several Tauri commands and AI plumbing legitimately take many parameters
+// (path + git options, or model/url/key/system/user/maxtok/event/...). Splitting
+// them into structs is just ceremony, so we silence this clippy lint crate-wide.
+#![allow(clippy::too_many_arguments)]
+
 mod commands;
 mod watcher;
 
