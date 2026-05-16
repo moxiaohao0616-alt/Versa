@@ -103,40 +103,41 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm cert.p12
 
-      # ── Secret presence diagnostic ──────────────────────────────────
-      # Prints which optional secrets are present (boolean only, no values).
-      # Makes it obvious from the log when a missing secret is the cause.
-      - name: check secrets
+      # Diagnostic + capability detection in a single bash step. We print
+      # boolean presence for each optional secret AND publish step outputs
+      # so subsequent steps can conditionally branch. Avoids the
+      # `secrets.* == ''` expression in `if:`, which can trip workflow
+      # parsing on some Actions runner versions.
+      - name: probe secrets
+        id: secrets
         shell: bash
         env:
           UPD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           APL: ${{ secrets.APPLE_CERTIFICATE }}
         run: |
-          mark() { if [ -n "$2" ]; then echo "  ✓ $1 is set"; else echo "  ✗ $1 is NOT set"; fi; }
-          echo "=== Versa CI secrets check ==="
-          mark "TAURI_SIGNING_PRIVATE_KEY" "$UPD"
-          mark "APPLE_CERTIFICATE         " "$APL"
-          echo "=============================="
-          if [ -z "$UPD" ]; then
-            echo "::warning ::TAURI_SIGNING_PRIVATE_KEY is not set — updater artifacts will NOT be signed. This build will likely still produce installers, but auto-update will not work for users on this version."
+          echo "=== Versa CI secrets ==="
+          if [ -n "$UPD" ]; then
+            echo "  ✓ TAURI_SIGNING_PRIVATE_KEY is set"
+            echo "has_updater=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "  ✗ TAURI_SIGNING_PRIVATE_KEY is NOT set"
+            echo "has_updater=false" >> "$GITHUB_OUTPUT"
+            echo "::warning ::TAURI_SIGNING_PRIVATE_KEY missing — will skip updater artifact signing."
           fi
+          if [ -n "$APL" ]; then
+            echo "  ✓ APPLE_CERTIFICATE is set"
+          else
+            echo "  ✗ APPLE_CERTIFICATE is NOT set"
+          fi
+          echo "========================"
 
-      # If the updater key isn't set, override createUpdaterArtifacts off so
-      # tauri build doesn't try to sign and abort. We patch tauri.conf.json
-      # in place before the bundle step.
+      # If the updater key isn't set, flip createUpdaterArtifacts off so
+      # tauri build doesn't try to sign and abort.
       - name: disable updater artifacts when no key
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' }}
+        if: steps.secrets.outputs.has_updater == 'false'
         shell: bash
         run: |
-          node -e "
-            const fs = require('fs');
-            const p = 'src-tauri/tauri.conf.json';
-            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-            c.bundle = c.bundle || {};
-            c.bundle.createUpdaterArtifacts = false;
-            fs.writeFileSync(p, JSON.stringify(c, null, 2));
-            console.log('Patched tauri.conf.json: createUpdaterArtifacts=false');
-          "
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.bundle=c.bundle||{};c.bundle.createUpdaterArtifacts=false;fs.writeFileSync(p,JSON.stringify(c,null,2));console.log('Patched tauri.conf.json: createUpdaterArtifacts=false');"
 
       - name: build & bundle
         uses: tauri-apps/tauri-action@v0
