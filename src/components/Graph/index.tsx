@@ -1,7 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore, type CommitInfo, type GraphCommit } from '../../store'
 import { RebaseModal } from '../Rebase'
+import { relTime } from '../../lib/relTime'
 
 const ROW_H = 36
 const LANE_W = 22
@@ -108,15 +110,6 @@ function makePath(e: GraphEdge): string {
   return `M ${x1} ${sy} L ${x1} ${inflect} C ${x1} ${y2} ${x2} ${y2 - ROW_H * 0.4} ${x2} ${ey}`
 }
 
-function relTime(ts: number): string {
-  const s = Math.floor(Date.now() / 1000 - ts)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`
-  if (s < 86400 * 30) return `${Math.floor(s / 86400)}天前`
-  return new Date(ts * 1000).toLocaleDateString('zh-CN')
-}
-
 function refClass(ref: string): string {
   if (ref === 'HEAD') return 'graph-ref-head'
   if (ref.includes('/')) return 'graph-ref-remote'
@@ -125,15 +118,16 @@ function refClass(ref: string): string {
 
 type TimeFilter = 'all' | '7d' | '30d' | '6m' | '1y'
 
-const TIME_FILTERS: { value: TimeFilter; label: string; seconds: number | null }[] = [
-  { value: 'all', label: '全部时间', seconds: null },
-  { value: '7d',  label: '近 7 天',  seconds: 7 * 86400 },
-  { value: '30d', label: '近 30 天', seconds: 30 * 86400 },
-  { value: '6m',  label: '近半年',   seconds: 180 * 86400 },
-  { value: '1y',  label: '近 1 年',  seconds: 365 * 86400 },
-]
+const TIME_FILTER_SECONDS: Record<TimeFilter, number | null> = {
+  'all': null,
+  '7d':  7 * 86400,
+  '30d': 30 * 86400,
+  '6m':  180 * 86400,
+  '1y':  365 * 86400,
+}
 
 export function GraphView() {
+  const { t } = useTranslation()
   const {
     repoPath, activeTab, checkoutCommit, selectCommit, repoStatus,
     revertCommit, cherryPickCommit, resetToCommit, createTag,
@@ -218,9 +212,9 @@ export function GraphView() {
     if (!hasFilter) return commits
     const msgQ = filterMsg.trim().toLowerCase()
     const cutoff = (() => {
-      const f = TIME_FILTERS.find(t => t.value === filterTime)
-      if (!f || !f.seconds) return 0
-      return Math.floor(Date.now() / 1000) - f.seconds
+      const fSeconds = TIME_FILTER_SECONDS[filterTime]
+      if (!fSeconds) return 0
+      return Math.floor(Date.now() / 1000) - fSeconds
     })()
     return commits.filter(c => {
       if (msgQ && !c.message.toLowerCase().includes(msgQ)) return false
@@ -330,8 +324,8 @@ export function GraphView() {
           <button
             className="commit-actions-btn"
             onClick={() => setMenuFor(menuFor === p.id ? null : p.id)}
-            title="提交操作"
-            aria-label="提交操作"
+            title={t('cheatsheet.kebab_desc')}
+            aria-label={t('cheatsheet.kebab_desc')}
           >
             <i className="ti ti-dots-vertical" />
           </button>
@@ -339,30 +333,30 @@ export function GraphView() {
             <div className="commit-actions-menu">
               <button onClick={() => { setMenuFor(null); setCheckoutTarget(p) }}>
                 <i className="ti ti-git-branch" />
-                <span>切换到这里</span>
+                <span>{t('graph.menu_checkout')}</span>
               </button>
               <button onClick={() => { setMenuFor(null); setRevertTarget(p) }}>
                 <i className="ti ti-arrow-back-up" />
-                <span>撤销这次提交</span>
+                <span>{t('graph.menu_revert')}</span>
               </button>
               <button onClick={() => { setMenuFor(null); setCherryTarget(p) }}>
                 <i className="ti ti-cherry" />
-                <span>拣选到当前分支</span>
+                <span>{t('graph.menu_cherrypick')}</span>
               </button>
               <button
                 onClick={() => { setMenuFor(null); setBisectStartTarget(p) }}
-                title="从这版往后二分查找出问题的提交"
+                title={t('graph.menu_bisect_hint')}
               >
                 <i className="ti ti-search" />
-                <span>从这里开始查找问题</span>
+                <span>{t('graph.menu_bisect_start')}</span>
               </button>
-              <button onClick={() => { setMenuFor(null); setResetTarget(p) }} title="把当前分支移回这版">
+              <button onClick={() => { setMenuFor(null); setResetTarget(p) }} title={t('graph.menu_reset_hint')}>
                 <i className="ti ti-rewind-backward-10" />
-                <span>回退到这版…</span>
+                <span>{t('graph.menu_reset')}</span>
               </button>
               <button onClick={() => { setMenuFor(null); setTagTarget(p); setTagName(''); setTagMessage('') }}>
                 <i className="ti ti-tag" />
-                <span>打标签…</span>
+                <span>{t('graph.menu_tag')}</span>
               </button>
             </div>
           )}
@@ -377,10 +371,10 @@ export function GraphView() {
         <button
           className="ct-btn"
           onClick={() => setRebaseOpen(true)}
-          title="对最近的提交做拖动重排、合并、删除"
+          title={t('graph.arrange_tooltip')}
         >
           <i className="ti ti-stack-2" />
-          整理提交
+          {t('graph.arrange_btn')}
         </button>
         <button
           className="ct-btn"
@@ -400,10 +394,10 @@ export function GraphView() {
             }
           }}
           disabled={bisectAiLoading}
-          title="让 AI 看一眼最近的提交，挑一个最可能没问题的版本作为 bisect 起点"
+          title={t('graph.ai_bisect_tooltip')}
         >
           <i className={`ti ${bisectAiLoading ? 'ti-loader-2' : 'ti-sparkles'}`} />
-          {bisectAiLoading ? 'AI 分析中…' : 'AI 推荐 bisect 起点'}
+          {bisectAiLoading ? t('graph.ai_bisect_loading') : t('graph.ai_bisect_btn')}
         </button>
         <div className="graph-toolbar-spacer" />
         <div className="graph-search">
@@ -411,15 +405,15 @@ export function GraphView() {
           <input
             type="text"
             value={filterMsg}
-            placeholder="搜索说明…"
+            placeholder={t('graph.search_placeholder')}
             onChange={e => setFilterMsg(e.target.value)}
           />
           {filterMsg && (
             <button
               className="graph-search-clear"
               onClick={() => setFilterMsg('')}
-              title="清空"
-              aria-label="清空说明搜索"
+              title={t('common.close')}
+              aria-label={t('graph.search_clear_aria')}
             >
               <i className="ti ti-x" />
             </button>
@@ -429,25 +423,27 @@ export function GraphView() {
           className="graph-filter-select"
           value={filterAuthor}
           onChange={e => setFilterAuthor(e.target.value)}
-          title="按作者过滤"
+          title={t('graph.author_filter_tooltip')}
         >
-          <option value="">作者: 全部</option>
+          <option value="">{t('graph.author_all_label')}</option>
           {authors.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <select
           className="graph-filter-select"
           value={filterTime}
           onChange={e => setFilterTime(e.target.value as TimeFilter)}
-          title="按时间范围过滤"
+          title={t('graph.time_filter_tooltip')}
         >
-          {TIME_FILTERS.map(t => (
-            <option key={t.value} value={t.value}>{t.label}</option>
-          ))}
+          <option value="all">{t('graph.time_all')}</option>
+          <option value="7d">{t('graph.time_7d')}</option>
+          <option value="30d">{t('graph.time_30d')}</option>
+          <option value="6m">{t('graph.time_6m')}</option>
+          <option value="1y">{t('graph.time_1y')}</option>
         </select>
         {hasFilter && (
-          <button className="ct-btn ghost" onClick={clearFilter} title="清空所有过滤">
+          <button className="ct-btn ghost" onClick={clearFilter} title={t('graph.clear_filters_tooltip')}>
             <i className="ti ti-x" />
-            清空过滤
+            {t('graph.clear_filters')}
           </button>
         )}
       </div>
@@ -463,7 +459,7 @@ export function GraphView() {
             onClick={() => jumpToCommit(prefixMatch)}
           >
             <i className="ti ti-arrow-right" />
-            {commits.some(c => c.id === prefixMatch.id) ? '跳转到这里' : '定位并跳转'}
+            {commits.some(c => c.id === prefixMatch.id) ? t('graph.jump_to') : t('graph.jump_locate')}
           </button>
         </div>
       )}
@@ -471,14 +467,14 @@ export function GraphView() {
       {commits.length === 0 ? (
         <div className="empty-state center">
           <i className="ti ti-git-commit" style={{ fontSize: 36, opacity: 0.15 }} />
-          <p>暂无提交记录</p>
+          <p>{t('graph.empty')}</p>
         </div>
       ) : hasFilter && filteredCommits.length === 0 ? (
         <div className="empty-state center">
           <i className="ti ti-search-off" style={{ fontSize: 36, opacity: 0.15 }} />
-          <p>没有匹配的提交</p>
+          <p>{t('graph.empty_no_match')}</p>
           <button className="ct-btn ghost" onClick={clearFilter} style={{ marginTop: 8 }}>
-            清空过滤
+            {t('graph.clear_filters')}
           </button>
         </div>
       ) : (
@@ -522,10 +518,10 @@ export function GraphView() {
                   className="ct-btn"
                   onClick={loadMoreGraph}
                   disabled={loadingMore}
-                  title={`再加载 ${useStore.getState().graphLoadStep} 条更早的提交`}
+                  title={t('graph.load_more_tooltip', { n: useStore.getState().graphLoadStep })}
                 >
                   <i className={`ti ${loadingMore ? 'ti-loader-2' : 'ti-arrow-down'}`} />
-                  {loadingMore ? '加载中…' : `再加载 ${useStore.getState().graphLoadStep} 条（当前 ${commits.length}）`}
+                  {loadingMore ? t('graph.loading') : t('graph.load_more_msg', { n: useStore.getState().graphLoadStep, total: commits.length })}
                 </button>
                 <button
                   className="ct-btn ghost"
@@ -534,17 +530,17 @@ export function GraphView() {
                     else loadAllGraph()
                   }}
                   disabled={loadingMore}
-                  title="一次性加载整个历史（仓库大可能慢）"
+                  title={t('graph.load_all_tooltip')}
                 >
                   <i className="ti ti-stack" />
-                  加载全部
+                  {t('graph.load_all_btn')}
                 </button>
               </>
             ) : (
               <span className="graph-load-more-done">
                 {loadingMore
-                  ? '加载中…'
-                  : `已加载全部 ${commits.length} 个提交`}
+                  ? t('graph.loading')
+                  : `${commits.length} commits`}
               </span>
             )}
           </div>
@@ -554,7 +550,7 @@ export function GraphView() {
       {checkoutTarget && (
         <div className="modal-overlay" onClick={() => setCheckoutTarget(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">切换到此提交？</div>
+            <div className="modal-title">{t('graph.checkout_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{checkoutTarget.shortId}</span>
@@ -562,12 +558,12 @@ export function GraphView() {
               </div>
               <p className="modal-warn">
                 <i className="ti ti-alert-triangle" />
-                这会让仓库进入「分离 HEAD」状态，在此状态下的新提交不属于任何分支。
+                {t('graph.checkout_warn')}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setCheckoutTarget(null)}>取消</button>
-              <button className="btn-primary" onClick={handleConfirmCheckout}>确认切换</button>
+              <button className="btn-secondary" onClick={() => setCheckoutTarget(null)}>{t('common.cancel')}</button>
+              <button className="btn-primary" onClick={handleConfirmCheckout}>{t('common.confirm')}</button>
             </div>
           </div>
         </div>
@@ -576,7 +572,7 @@ export function GraphView() {
       {revertTarget && (
         <div className="modal-overlay" onClick={() => setRevertTarget(null)}>
           <div className="modal commit-msg-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">撤销这次提交？</div>
+            <div className="modal-title">{t('graph.revert_title')}</div>
             <div className="modal-body">
               <div className="modal-commit-preview">
                 <span className="graph-sha">{revertTarget.shortId}</span>
@@ -608,7 +604,7 @@ export function GraphView() {
                 }}
               >
                 <i className="ti ti-arrow-back-up" />
-                确认撤销
+                {t('graph.revert_confirm')}
               </button>
             </div>
           </div>
