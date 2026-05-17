@@ -129,16 +129,11 @@ jobs:
           fi
           echo "========================"
 
-      # If the updater key isn't set, flip createUpdaterArtifacts off so
-      # tauri build doesn't try to sign and abort. Also flip it off on macOS
-      # for now — bundling the .app.tar.gz updater artifact on the runner is
-      # currently failing for reasons we can't tell from the log endpoint
-      # (auth-gated). Re-enable once we've isolated the cause.
-      - name: disable updater artifacts when no key
-        if: steps.secrets.outputs.has_updater == 'false' || runner.os == 'macOS'
-        shell: bash
-        run: |
-          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.bundle=c.bundle||{};c.bundle.createUpdaterArtifacts=false;fs.writeFileSync(p,JSON.stringify(c,null,2));console.log('Patched tauri.conf.json: createUpdaterArtifacts=false');"
+      # NOTE: updater is currently disabled in tauri.conf.json
+      # (createUpdaterArtifacts=false, updater.active=false). When we
+      # re-enable it, also re-add a step that flips it off when
+      # TAURI_SIGNING_PRIVATE_KEY isn't available, so missing-secret
+      # builds keep working.
 
       - name: build & bundle
         uses: tauri-apps/tauri-action@v0

@@ -37,7 +37,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "macOS": {
       "minimumSystemVersion": "10.15",
       "signingIdentity": null,
@@ -55,8 +55,7 @@
       "open": true
     },
     "updater": {
-      "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxRjBGN0FCNjFBNDRDMzUKUldRMVRLUmhxL2Z3VVg1em5yTldHNjlnWlVZZ3ZEclJ4VFBQTmMxTTFpTEpjVlpteHRrTjR3cTEK",
+      "active": false,
       "endpoints": [
         "https://github.com/moxiaohao0616-alt/Versa/releases/latest/download/latest.json"
       ]
