@@ -507,9 +507,13 @@ body {
 
 .sync-row { display: flex; gap: 6px; align-items: center; }
 .sync-row .btn-primary {
-  flex: 1;            /* take leftover width — push is the primary action */
-  min-width: 0;
-  white-space: nowrap; /* "Push to cloud" must never wrap */
+  flex: 1 1 auto;
+  /* Drop min-width:0 so the button never shrinks below its content +
+     padding — that's what was squashing "推送到云" against the icon. */
+  white-space: nowrap;
+  padding: 8px 18px;
+  gap: 8px;
+  justify-content: center;
 }
 
 .btn-primary {
@@ -564,11 +568,11 @@ body {
 .reset-mode-desc { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
 
 .btn-icon {
-  padding: 8px 12px;
+  padding: 7px 9px;
   background: transparent; color: var(--text2);
   border: 0.5px solid var(--border2); border-radius: var(--radius);
   cursor: pointer; position: relative; display: flex; align-items: center;
-  font-size: 16px;        /* icons in btn-icon inherit this */
+  flex-shrink: 0;          /* don't let the icons squeeze the push button */
 }
 .btn-icon > .ti { font-size: 16px; }
 
