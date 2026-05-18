@@ -114,5 +114,9 @@ pub fn handle_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 
 fn open_url<R: Runtime>(app: &AppHandle<R>, url: &str) {
     use tauri_plugin_shell::ShellExt;
+    // `Shell::open` is marked deprecated in favor of tauri-plugin-opener,
+    // but adding that plugin just for two static help-menu URLs isn't
+    // worth the dep churn yet; suppress until we migrate plugins app-wide.
+    #[allow(deprecated)]
     let _ = app.shell().open(url, None);
 }
