@@ -89,7 +89,7 @@ function lastAtOrAbove(offsets: number[], y: number): number {
 export function DiffView() {
   const { t } = useTranslation()
   const {
-    diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit,
+    diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit, repoPath,
     stageHunk, unstageHunk, showToast,
     diffWordLevel, diffIgnoreWhitespace, setDiffWordLevel, setDiffIgnoreWhitespace,
   } = useStore()
@@ -313,10 +313,25 @@ export function DiffView() {
     <div className="diff-view">
       {diff.length > 0 && (
         <div className="diff-header">
-          <span className="diff-filename">
+          <button
+            type="button"
+            className="diff-filename"
+            title={selectedFile ? `${t('diff.copy_path_tooltip')}\n${repoPath ? `${repoPath}/${selectedFile}` : selectedFile}` : ''}
+            onClick={async () => {
+              if (!selectedFile) return
+              const abs = repoPath ? `${repoPath}/${selectedFile}` : selectedFile
+              try {
+                await navigator.clipboard.writeText(abs)
+                showToast(t('diff.path_copied'), 'success')
+              } catch (e) {
+                showToast(String(e), 'error')
+              }
+            }}
+          >
             <i className="ti ti-file-code" />
-            {selectedFile}
-          </span>
+            <bdo dir="ltr" className="diff-filename-path">{selectedFile}</bdo>
+            <i className="ti ti-copy diff-filename-copy" />
+          </button>
           <div className="diff-header-right">
             <div className="diff-stats">
               <span className="added">+{added}</span>
@@ -452,16 +467,19 @@ export function DiffView() {
       )}
 
       <div className="diff-content" ref={containerRef}>
-        {!hasFiles && (
+        {/* "Working tree is clean" message — only when we're actually
+            looking at the working tree, not when reviewing a historical
+            commit (where the working tree being clean is normal). */}
+        {!hasFiles && !selectedCommit && (
           <div className="empty-state center">
             <i className="ti ti-circle-check" style={{ fontSize: 40, opacity: 0.15 }} />
             <p>{t('diff.no_changes')}</p>
           </div>
         )}
-        {hasFiles && !selectedFile && items.length === 0 && (
+        {!selectedFile && items.length === 0 && (hasFiles || selectedCommit) && (
           <div className="empty-state center">
             <i className="ti ti-file-diff" style={{ fontSize: 40, opacity: 0.2 }} />
-            <p>选择左侧文件查看改动</p>
+            <p>{t('diff.pick_file_hint')}</p>
           </div>
         )}
         {items.length > 0 && (

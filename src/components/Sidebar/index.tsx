@@ -122,7 +122,8 @@ export function Sidebar() {
               <span className="commit-context-msg">{selectedCommit.message}</span>
             </div>
             <button className="commit-context-clear" title={t('sidebar.exit_view')} onClick={() => selectCommit(null)}>
-              <i className="ti ti-x" />
+              <i className="ti ti-arrow-back-up" />
+              <span>{t('sidebar.back_to_changes')}</span>
             </button>
           </div>
 

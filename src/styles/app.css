@@ -511,14 +511,16 @@ body {
 .branch-dropdown-item .ti-git-branch { color: var(--text3); font-size: 13px; }
 .branch-dropdown-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sync-row { display: flex; gap: 6px; align-items: center; }
+.sync-row { display: flex; gap: 5px; align-items: center; min-width: 0; }
 .sync-row .btn-primary {
-  flex: 1 1 auto;
-  /* Drop min-width:0 so the button never shrinks below its content +
-     padding — that's what was squashing "推送到云" against the icon. */
+  /* Don't grow — claim only the space the text + icon need, so the
+     icon buttons to the right always stay visible. The badge ("1"
+     when ahead) is the typical reason this button gets wider. */
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
-  padding: 8px 18px;
-  gap: 8px;
+  padding: 8px 14px;
+  gap: 6px;
   justify-content: center;
 }
 
@@ -653,9 +655,45 @@ body {
 
 .diff-view { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .diff-header {
-  padding: 0 16px;
+  padding: 10px 16px;
+  gap: 16px;
   border-bottom: 0.5px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
+  min-height: 38px;
+}
+.diff-filename {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.diff-filename:hover { background: var(--bg2); }
+.diff-filename:hover .diff-filename-copy { opacity: 1; }
+.diff-filename > .ti { flex-shrink: 0; color: var(--text3); }
+.diff-filename-copy { font-size: 13px; opacity: 0; transition: opacity 0.12s; }
+.diff-filename-path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  /* Truncate long paths from the LEFT (with a leading ellipsis) so the
+     actual filename — the last segment — always stays visible. The
+     `direction: rtl` flips the visual truncation; the inner `bdo dir=ltr`
+     in the JSX keeps each character's order correct. */
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
 }
 .tab-bar { display: flex; }
 .tab {
@@ -1329,34 +1367,39 @@ body {
   z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 12px 16px 12px 14px;
   border-radius: var(--radius);
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.55;
   box-shadow: 0 4px 20px rgba(0,0,0,0.18);
   animation: toastIn 0.2s ease;
-  pointer-events: none;
-  max-width: 360px;
+  pointer-events: auto;
+  max-width: 520px;
 }
+.toast > .ti { flex-shrink: 0; font-size: 16px; opacity: 0.85; align-self: flex-start; margin-top: 2px; }
+.toast > span { flex: 1 1 auto; min-width: 0; }
 .toast-success { background: var(--green-bg); color: var(--green-text); border: 0.5px solid rgba(99,153,34,0.3); }
 .toast-error   { background: var(--red-bg);   color: var(--red-text);   border: 0.5px solid rgba(191,70,70,0.3); }
 .toast-copy {
-  margin-left: 8px;
+  flex-shrink: 0;
+  margin-left: 4px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 9px;
+  padding: 5px 11px;
   border: 0.5px solid currentColor;
   border-radius: 999px;
   background: transparent;
   color: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
   opacity: 0.85;
+  white-space: nowrap;
 }
 .toast-copy:hover { opacity: 1; }
-.toast-copy > .ti { font-size: 12px; }
+.toast-copy > .ti { font-size: 12px; flex-shrink: 0; }
 
 /* ── Error boundary fallback ───────────────────────────────────────── */
 .errboundary {
@@ -1551,18 +1594,22 @@ body {
 }
 .commit-context-clear {
   flex-shrink: 0;
-  background: none;
-  border: none;
+  background: rgba(180,130,0,0.10);
+  border: 0.5px solid rgba(180,130,0,0.25);
   color: var(--amber-text);
   cursor: pointer;
-  opacity: 0.6;
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 13px;
+  opacity: 0.95;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
   display: flex;
   align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
-.commit-context-clear:hover { opacity: 1; background: rgba(180,130,0,0.12); }
+.commit-context-clear > .ti { font-size: 13px; }
+.commit-context-clear:hover { opacity: 1; background: rgba(180,130,0,0.20); }
 
 /* AI commit explanation — below the context banner, above the file list */
 .commit-explain-btn {

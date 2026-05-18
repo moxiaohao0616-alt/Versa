@@ -63,22 +63,20 @@ pub fn open_repo(path: String) -> Result<RepoStatus, String> {
 }
 
 #[tauri::command]
-pub fn save_progress(path: String, message: String) -> Result<String, String> {
+pub async fn save_progress(path: String, message: String) -> Result<String, String> {
+    // Route through shell `git` instead of libgit2 because the latter
+    // rejects index entries for nested git repos (e.g. an untracked
+    // folder with its own .git inside emits paths like
+    // 'verticals/verticals-dev-guid/' that libgit2 errors on with
+    // "invalid path"). Shell git handles those cases gracefully —
+    // treats them as submodules or skips them — which is what the user
+    // expects from a "commit everything" button.
+    run_git_simple(&["add", "-A"], &path).await?;
+    run_git_simple(&["commit", "-m", &message], &path).await?;
     let repo = Repository::open(&path).map_err(fe)?;
-    let mut index = repo.index().map_err(fe)?;
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
-        .map_err(fe)?;
-    index.write().map_err(fe)?;
-    let oid = index.write_tree().map_err(fe)?;
-    let tree = repo.find_tree(oid).map_err(fe)?;
-    let sig = repo.signature().map_err(fe)?;
-    let parent = repo.head().ok()
-        .and_then(|h| h.target())
-        .and_then(|t| repo.find_commit(t).ok());
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-    let commit_id = repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &parents)
-        .map_err(fe)?;
-    Ok(commit_id.to_string())
+    let head = repo.head().map_err(fe)?;
+    let oid = head.target().ok_or_else(|| "HEAD has no target".to_string())?;
+    Ok(oid.to_string())
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -3375,9 +3373,8 @@ pub fn restore_to_reflog(path: String, sha: String) -> Result<(), String> {
 // ── GPG sign-aware commit ────────────────────────────────────────────────
 
 /// Replacement for `save_progress` that optionally produces a signed commit.
-/// When `sign` is true we shell out to `git commit -S` so the user's existing
-/// gpg/ssh signing config (`user.signingkey`, `gpg.format`, agent, etc.) just
-/// works. Otherwise we still go through libgit2 for speed.
+/// When `sign` is true we add `-S` so the user's existing gpg/ssh signing
+/// config (`user.signingkey`, `gpg.format`, agent, etc.) just works.
 #[tauri::command]
 pub async fn save_progress_signed(
     path: String,
@@ -3386,7 +3383,7 @@ pub async fn save_progress_signed(
 ) -> Result<String, String> {
     if !sign {
         // Fast path — same as plain save_progress.
-        return save_progress(path, message);
+        return save_progress(path, message).await;
     }
     // Stage everything (matches save_progress semantics).
     run_git_simple(&["add", "-A"], &path).await?;
