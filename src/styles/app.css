@@ -421,19 +421,19 @@ body {
   height: 0.5px; background: var(--border); margin: 3px 6px;
 }
 
-/* Branch pill — now sits at the start of the sync-row alongside push/pull/
-   fetch buttons. Cap the visible name with ellipsis so a long branch name
-   doesn't push other actions out of the row. */
-.branch-pill-wrap { position: relative; flex-shrink: 1; min-width: 0; }
+/* Branch row sits above the sync (push/pull/...) row so the branch pill
+   gets the full sidebar width and the push button never wraps to two lines. */
+.branch-row { margin-bottom: 8px; }
+.branch-pill-wrap { position: relative; display: inline-block; max-width: 100%; }
 
 .branch-pill {
   font-size: 12px;
   background: var(--blue-bg); color: var(--blue-text);
-  padding: 6px 10px;
-  border-radius: var(--radius);
+  padding: 4px 10px;
+  border-radius: 999px;
   border: none; cursor: pointer;
-  display: flex; align-items: center; gap: 4px;
-  max-width: 160px;
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%;
 }
 .branch-pill:hover { filter: brightness(0.94); }
 .branch-pill .ti { font-size: 12px; flex-shrink: 0; }
@@ -442,6 +442,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  font-weight: 500;
 }
 
 .branch-dropdown {
@@ -470,9 +471,12 @@ body {
 .branch-dropdown-item .ti-git-branch { color: var(--text3); font-size: 13px; }
 .branch-dropdown-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sync-row { display: flex; gap: 6px; align-items: stretch; }
-.sync-row .branch-pill-wrap + .btn-primary { margin-left: 2px; }
-.sync-row .btn-primary { flex-shrink: 0; }
+.sync-row { display: flex; gap: 6px; align-items: center; }
+.sync-row .btn-primary {
+  flex: 1;            /* take leftover width — push is the primary action */
+  min-width: 0;
+  white-space: nowrap; /* "Push to cloud" must never wrap */
+}
 
 .btn-primary {
   flex: 1; padding: 7px 12px;

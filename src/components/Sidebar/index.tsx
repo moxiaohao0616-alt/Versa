@@ -117,11 +117,10 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      {/* Sidebar header: branch switcher + git sync controls.
-          The repo name + path is already in the TabStrip up top, so this
-          section is purely "do something with this repo" actions. */}
+      {/* Sidebar header: branch switcher on its own row, then git sync
+          controls below. Repo name + path live in the TabStrip up top. */}
       <div className="sidebar-header">
-        <div className="sync-row">
+        <div className="branch-row">
           <div className="branch-pill-wrap" ref={branchRef}>
             <button className="branch-pill" onClick={handleBranchClick} title={branch}>
               <i className="ti ti-git-branch" />
@@ -169,6 +168,8 @@ export function Sidebar() {
               </div>
             )}
           </div>
+        </div>
+        <div className="sync-row">
           <button className="btn-primary" onClick={handlePush} disabled={pushing}>
             <i className={`ti ${pushing ? 'ti-loader-2' : 'ti-cloud-upload'}`} />
             {pushing ? t('sidebar.pushing') : t('sidebar.push')}
