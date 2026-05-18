@@ -6,6 +6,7 @@ export const en: Translations = {
     tagline: 'Easy Git for Everyone',
   },
   toast: {
+    commit_ok: 'Saved as {{short}}',
     push_ok: 'Pushed',
     pull_ok: 'Pulled',
     fetch_ok: 'Refs fetched (not merged)',

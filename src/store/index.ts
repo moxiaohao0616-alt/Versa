@@ -862,18 +862,25 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   saveProgress: async () => {
-    const { repoPath, commitMessage, gpgSign } = get()
+    const { repoPath, commitMessage, gpgSign, showToast } = get()
     if (!repoPath || !commitMessage.trim()) return
     set({ loading: true })
     try {
       // save_progress_signed forwards to save_progress when sign=false; only
       // the sign=true path shells out to `git commit -S` and respects the
       // user's gpg/ssh signing config.
-      await invoke('save_progress_signed', { path: repoPath, message: commitMessage, sign: gpgSign })
+      const sha = await invoke<string>('save_progress_signed', {
+        path: repoPath,
+        message: commitMessage,
+        sign: gpgSign,
+      })
       set({ commitMessage: '' })
       await get().refreshRepo()
+      showToast(tt('toast.commit_ok', { short: sha.slice(0, 7) }), 'success')
     } catch (e) {
-      set({ error: String(e) })
+      // Surface as a toast — previously the error went to state.error which
+      // nobody renders, so a failed commit looked like "nothing happened".
+      showToast(String(e), 'error')
     } finally {
       set({ loading: false })
     }

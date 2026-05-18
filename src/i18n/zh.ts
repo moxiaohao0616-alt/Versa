@@ -7,6 +7,7 @@ export const zh = {
     tagline: 'Easy Git for Everyone',
   },
   toast: {
+    commit_ok: '已保存为 {{short}}',
     push_ok: '推送成功',
     pull_ok: '拉取成功',
     fetch_ok: '已拉取最新引用（未合并）',
