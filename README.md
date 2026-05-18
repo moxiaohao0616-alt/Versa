@@ -10,13 +10,16 @@
   </p>
 </div>
 
-Versa is a desktop Git client built for full-stack engineers who want a fast,
-opinionated UI without giving up the speed and depth of the command line.
-Every git verb is translated into something a human says — "save progress",
-"this commit is good / bad", "go back to this step" — without ever hiding the
-real thing underneath. When a workflow is hairy (merge conflicts, interactive
-rebase, bisect, reflog rewind), the UI walks you through it; when you'd
-rather drop to a shell, ⌘\` opens an xterm in the repo.
+**Versa is a Git client built for the vibe-coding era** — for engineers
+who spend most of their day pairing with Cursor, Claude Code, Copilot,
+or any other AI coding partner, and want a Git GUI that fits *that*
+workflow instead of the 2014 one. Generate commit messages from the
+staged diff, get a real recommendation on a 3-way merge conflict, walk
+through hairy operations (rebase, bisect, reflog rewind) without leaving
+the UI. Every git verb is translated into something a human says —
+"save progress", "this commit is good / bad", "go back to this step" —
+without ever hiding the real command underneath. When you'd rather drop
+to a shell, ⌘\` opens an xterm at the repo root.
 
 > **Status: developer preview.** Builds on macOS, Linux and Windows. The
 > happy paths are stable; bug surface around edge cases is still real.
@@ -43,7 +46,7 @@ something the others aren't:
   neither", a live merged-result preview that **scrolls in sync** with
   whichever hunk you're inspecting, and once everything is resolved a
   review screen with the full staged diff — see exactly what's about to
-  ship before clicking 完成合并.
+  ship before clicking "Finish merge".
 - **Embedded xterm.js terminal.** ⌘\` toggles a real shell at the repo
   root. The UI walks you through hairy workflows; when you'd rather drop
   to git CLI, you're one keystroke away.
@@ -53,7 +56,7 @@ something the others aren't:
   lane spacing so a repo with 30 concurrent branches still reads cleanly.
 - **Reflog "Time Machine".** Every HEAD-moving operation (commit, checkout,
   reset, rebase, pull, cherry-pick…) is a clickable row with a friendly
-  2-char verb chip. Pick any past HEAD, hit 回到这步, done. The reset
+  2-char verb chip. Pick any past HEAD, hit "Go back here", done. The reset
   itself is logged, so you can undo with the same tool — it's the safety
   net most GUIs don't even surface.
 - **Bisect + Interactive rebase as guided workflows.** Drag-and-drop rebase
@@ -63,8 +66,9 @@ something the others aren't:
   isolated state — no losing context bouncing between projects.
 - **Free, open source, no tiers.** Apache 2.0; no "GitKraken Pro for
   private repos", no Tower subscription, no contributor agreement.
-- **Bilingual (中文 / English) out of the box.** First-class internal
-  i18n that follows your OS language, not a community translation plugin.
+- **Bilingual UI (Chinese / English) out of the box.** First-class
+  internal i18n that follows your OS language, not a community
+  translation plugin.
 
 ## Key features
 
@@ -99,7 +103,7 @@ something the others aren't:
   highlights the current hunk's region in green
 - When every conflict is resolved, swap to a **review screen** that shows the
   full staged diff (file-by-file, expandable) — see exactly what's about to
-  ship before clicking "完成合并"
+  ship before clicking "Finish merge"
 - AI can read the conflict and recommend ours / theirs / both with a
   one-sentence rationale
 - Works for merge, rebase, revert and cherry-pick — same UI, mode-aware labels
@@ -175,7 +179,7 @@ something the others aren't:
 
 <details open><summary><b>Quality-of-life</b></summary>
 
-- Bilingual (English / 中文) UI, language switch in Settings
+- Bilingual (English / Chinese) UI, language switch in Settings
 - First-launch onboarding tour
 - Keyboard cheatsheet (`?`) and many shortcuts
 - Settings import / export as JSON for moving between machines
@@ -242,7 +246,7 @@ Press `?` anytime for the full sheet. Highlights (`⌘` is `Ctrl` on Windows / L
 
 Versa never sees your code unless you give it an API key. To enable AI features:
 
-1. Open **Settings → AI 服务商 / AI provider**
+1. Open **Settings → AI provider**
 2. Pick your provider and paste a key. The key only ever lives in
    your machine's `localStorage`; it is never sent to a Versa server
    (there is no Versa server).
