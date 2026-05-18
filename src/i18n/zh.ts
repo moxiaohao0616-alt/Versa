@@ -125,6 +125,7 @@ export const zh = {
     reflog_tooltip: '时光机 · 查看并回到任意一步',
     save_progress: '保存进度',
     stage_first: '请先暂存文件',
+    stage_all_hint: '没有手动暂存——会自动把所有改动一起保存',
     commit_placeholder: '描述这次改动了什么...',
     commit_label: '提交说明',
     ai_generate: 'AI 生成',

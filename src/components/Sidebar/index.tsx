@@ -282,11 +282,17 @@ export function Sidebar() {
                 />
                 <button
                   className="btn-primary full"
-                  disabled={!commitMessage.trim() || stagedFiles.length === 0}
+                  // Enabled as long as there's a message AND any change in the
+                  // tree (staged or unstaged). When nothing's staged we still
+                  // commit — save_progress on the backend stages everything
+                  // first. This avoids the "I typed a message, why is it
+                  // stuck" trap when users skip the explicit stage step.
+                  disabled={!commitMessage.trim() || files.length === 0}
                   onClick={saveProgress}
+                  title={stagedFiles.length === 0 ? t('sidebar.stage_all_hint') : undefined}
                 >
                   <i className="ti ti-device-floppy" />
-                  {stagedFiles.length === 0 ? t('sidebar.stage_first') : t('sidebar.save_progress')}
+                  {t('sidebar.save_progress')}
                 </button>
               </div>
             </>

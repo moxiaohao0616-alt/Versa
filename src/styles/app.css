@@ -492,6 +492,12 @@ body {
   z-index: 200;
   padding: 3px;
 }
+/* In the titlebar (right-anchored), grow leftward so the dropdown
+   stays inside the viewport instead of overflowing past the right edge. */
+.branch-switcher-indicator .branch-dropdown {
+  left: auto;
+  right: 0;
+}
 .branch-dropdown-item {
   display: flex; align-items: center; gap: 8px;
   width: 100%; padding: 6px 10px;

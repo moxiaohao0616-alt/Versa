@@ -124,6 +124,7 @@ export const en: Translations = {
     reflog_tooltip: 'Time machine · go back to any step',
     save_progress: 'Save progress',
     stage_first: 'Stage some files first',
+    stage_all_hint: 'Nothing staged — will save all changes together',
     commit_placeholder: 'Describe what changed…',
     commit_label: 'Commit message',
     ai_generate: 'AI generate',
