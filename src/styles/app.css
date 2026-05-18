@@ -421,10 +421,11 @@ body {
   height: 0.5px; background: var(--border); margin: 3px 6px;
 }
 
-/* Branch row sits above the sync (push/pull/...) row so the branch pill
-   gets the full sidebar width and the push button never wraps to two lines. */
-.branch-row { margin-bottom: 8px; }
-.branch-pill-wrap { position: relative; display: inline-block; max-width: 100%; }
+/* Branch row sits above the sync (push/pull/...) row. The pill sizes to
+   its content so a short name like "main" stays tight; long names cap at
+   ~220px and ellipsize. */
+.branch-row { display: flex; align-items: center; margin-bottom: 8px; }
+.branch-pill-wrap { position: relative; max-width: 100%; }
 
 .branch-pill {
   font-size: 12px;
@@ -432,30 +433,34 @@ body {
   padding: 4px 10px;
   border-radius: 999px;
   border: none; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 4px;
-  max-width: 100%;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 220px;
+  font-weight: 500;
 }
 .branch-pill:hover { filter: brightness(0.94); }
 .branch-pill .ti { font-size: 12px; flex-shrink: 0; }
+.branch-pill .ti-chevron-down { opacity: 0.7; }
 .branch-pill-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  font-weight: 500;
 }
 
 .branch-dropdown {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
-  min-width: 160px;
+  left: 0;
+  right: auto;
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 360px;
+  overflow-y: auto;
   background: var(--bg);
   border: 0.5px solid var(--border2);
   border-radius: var(--radius);
   box-shadow: 0 6px 20px rgba(0,0,0,0.12);
   z-index: 200;
-  overflow: hidden;
   padding: 3px;
 }
 .branch-dropdown-item {
