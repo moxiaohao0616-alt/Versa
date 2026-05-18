@@ -414,45 +414,35 @@ body {
 
 .sidebar-header { padding: 12px 14px; border-bottom: 0.5px solid var(--border); }
 
-.repo-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px;
-  border: 0.5px solid var(--border2);
-  border-radius: var(--radius);
-}
-.repo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-.repo-name { font-weight: 500; }
-
-.repo-name-wrap { flex: 1; min-width: 0; position: relative; }
-
-.repo-name-btn {
-  width: 100%;
-  display: flex; align-items: center; gap: 4px;
-  border: none; background: transparent; cursor: pointer;
-  color: var(--text); padding: 0; text-align: left;
-  border-radius: 4px;
-}
-.repo-name-btn:hover { color: var(--text2); }
-.repo-name-btn .ti { font-size: 12px; color: var(--text3); flex-shrink: 0; }
-
-.repo-dropdown { left: 0; right: auto; min-width: 200px; }
-.repo-open-new { color: var(--text); font-weight: 500; }
-.repo-open-new .ti { color: var(--text2); }
+/* The .repo-row card was removed — repo identity now lives in the TabStrip.
+   We keep the dropdown divider helper because it's reused inside the
+   branch-dropdown panel. */
 .repo-dropdown-divider {
   height: 0.5px; background: var(--border); margin: 3px 6px;
 }
 
-.branch-pill-wrap { position: relative; flex-shrink: 0; }
+/* Branch pill — now sits at the start of the sync-row alongside push/pull/
+   fetch buttons. Cap the visible name with ellipsis so a long branch name
+   doesn't push other actions out of the row. */
+.branch-pill-wrap { position: relative; flex-shrink: 1; min-width: 0; }
 
 .branch-pill {
-  font-size: 11px;
+  font-size: 12px;
   background: var(--blue-bg); color: var(--blue-text);
-  padding: 2px 8px 2px 8px; border-radius: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
   border: none; cursor: pointer;
   display: flex; align-items: center; gap: 4px;
+  max-width: 160px;
 }
 .branch-pill:hover { filter: brightness(0.94); }
-.branch-pill .ti { font-size: 10px; }
+.branch-pill .ti { font-size: 12px; flex-shrink: 0; }
+.branch-pill-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 
 .branch-dropdown {
   position: absolute;
@@ -480,7 +470,9 @@ body {
 .branch-dropdown-item .ti-git-branch { color: var(--text3); font-size: 13px; }
 .branch-dropdown-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sync-row { display: flex; gap: 6px; margin-top: 8px; }
+.sync-row { display: flex; gap: 6px; align-items: stretch; }
+.sync-row .branch-pill-wrap + .btn-primary { margin-left: 2px; }
+.sync-row .btn-primary { flex-shrink: 0; }
 
 .btn-primary {
   flex: 1; padding: 7px 12px;
