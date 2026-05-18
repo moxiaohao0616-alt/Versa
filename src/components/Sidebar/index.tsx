@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import { StashModal } from '../Stash'
 import { ReflogModal } from '../Reflog'
@@ -13,7 +12,7 @@ export function Sidebar() {
     selectedCommit, commitFiles,
     commitMessage, selectFile, selectCommit,
     stageFile, unstageFile, discardFile,
-    saveProgress, setCommitMessage, switchBranch, createBranch,
+    saveProgress, setCommitMessage,
     pushBranch, pullBranch, fetchAll,
     generateCommitMessage, aiGenerating,
     gitProgress,
@@ -24,35 +23,11 @@ export function Sidebar() {
   const [stashOpen, setStashOpen] = useState(false)
   const [reflogOpen, setReflogOpen] = useState(false)
 
-  const [branchOpen, setBranchOpen] = useState(false)
-  const [branches, setBranches] = useState<string[]>([])
-  const [newBranchVisible, setNewBranchVisible] = useState(false)
-  const [newBranchName, setNewBranchName] = useState('')
-  const branchRef = useRef<HTMLDivElement>(null)
-  const newBranchInputRef = useRef<HTMLInputElement>(null)
-
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [fetching, setFetching] = useState(false)
 
   const [discardTarget, setDiscardTarget] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!branchOpen) return
-    const handler = (e: MouseEvent) => {
-      if (branchRef.current && !branchRef.current.contains(e.target as Node)) {
-        setBranchOpen(false)
-        setNewBranchVisible(false)
-        setNewBranchName('')
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [branchOpen])
-
-  useEffect(() => {
-    if (newBranchVisible) newBranchInputRef.current?.focus()
-  }, [newBranchVisible])
 
   // Auto-pick a file to show as soon as the repo (or tab) loads so the right
   // pane isn't blank on first arrival. Prefer the first unstaged file (the
@@ -76,32 +51,9 @@ export function Sidebar() {
 
   if (!repoStatus) return null
 
-  const { files, branch, ahead, behind } = repoStatus
+  const { files, ahead, behind } = repoStatus
   const stagedFiles = files.filter(f => f.stagedStatus)
   const unstagedFiles = files.filter(f => f.unstagedStatus)
-
-  const handleBranchClick = async () => {
-    if (!repoPath) return
-    const list = await invoke<string[]>('get_branches', { path: repoPath })
-    setBranches(list)
-    setBranchOpen(v => !v)
-    setNewBranchVisible(false)
-    setNewBranchName('')
-  }
-
-  const handleSelectBranch = async (name: string) => {
-    setBranchOpen(false)
-    if (name !== branch) await switchBranch(name)
-  }
-
-  const handleCreateBranch = async () => {
-    const name = newBranchName.trim()
-    if (!name) return
-    setBranchOpen(false)
-    setNewBranchVisible(false)
-    setNewBranchName('')
-    await createBranch(name)
-  }
 
   const handlePush = async () => {
     setPushing(true)
@@ -117,58 +69,10 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      {/* Sidebar header: branch switcher on its own row, then git sync
-          controls below. Repo name + path live in the TabStrip up top. */}
+      {/* Sidebar header is now just the action row. Branch switcher lives
+          in the window titlebar (single-source-of-truth for current branch).
+          Repo name + path live in the TabStrip up top. */}
       <div className="sidebar-header">
-        <div className="branch-row">
-          <div className="branch-pill-wrap" ref={branchRef}>
-            <button className="branch-pill" onClick={handleBranchClick} title={branch}>
-              <i className="ti ti-git-branch" />
-              <span className="branch-pill-name">{branch}</span>
-              <i className="ti ti-chevron-down" />
-            </button>
-            {branchOpen && (
-              <div className="branch-dropdown">
-                {branches.map(b => (
-                  <button
-                    key={b}
-                    className={`branch-dropdown-item ${b === branch ? 'active' : ''}`}
-                    onClick={() => handleSelectBranch(b)}
-                  >
-                    <i className="ti ti-git-branch" />
-                    <span className="branch-dropdown-name">{b}</span>
-                    {b === branch && <i className="ti ti-check" style={{ marginLeft: 'auto' }} />}
-                  </button>
-                ))}
-                <div className="repo-dropdown-divider" />
-                {newBranchVisible ? (
-                  <div className="new-branch-row">
-                    <i className="ti ti-git-branch" />
-                    <input
-                      ref={newBranchInputRef}
-                      className="new-branch-input"
-                      placeholder={t('sidebar.new_branch_placeholder')}
-                      value={newBranchName}
-                      onChange={e => setNewBranchName(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') handleCreateBranch()
-                        if (e.key === 'Escape') { setNewBranchVisible(false); setNewBranchName('') }
-                      }}
-                    />
-                    <button className="new-branch-confirm" onClick={handleCreateBranch} disabled={!newBranchName.trim()}>
-                      {t('sidebar.confirm_create')}
-                    </button>
-                  </div>
-                ) : (
-                  <button className="branch-dropdown-item" onClick={() => setNewBranchVisible(true)}>
-                    <i className="ti ti-plus" />
-                    <span>{t('sidebar.new_branch')}</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
         <div className="sync-row">
           <button className="btn-primary" onClick={handlePush} disabled={pushing}>
             <i className={`ti ${pushing ? 'ti-loader-2' : 'ti-cloud-upload'}`} />

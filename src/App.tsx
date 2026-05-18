@@ -15,6 +15,7 @@ import { ConflictView } from './components/Conflict'
 import { TabStrip } from './components/TabStrip'
 import { BisectBanner } from './components/Bisect'
 import { RightSidebar } from './components/RightSidebar'
+import { BranchSwitcher } from './components/BranchSwitcher'
 import { CheatsheetModal } from './components/Cheatsheet'
 import { AboutModal } from './components/About'
 import { OnboardingModal, shouldShowOnboarding } from './components/Onboarding'
@@ -240,17 +241,17 @@ export default function App() {
       <div
         className="titlebar"
         onMouseDown={e => {
-          if (e.button === 0 && !(e.target as Element).closest('.traffic-lights')) {
+          // Exclude both traffic-lights and the branch switcher button so
+          // clicking either doesn't start a window drag.
+          const target = e.target as Element
+          if (e.button === 0
+              && !target.closest('.traffic-lights')
+              && !target.closest('.branch-switcher')) {
             getCurrentWebviewWindow().startDragging()
           }
         }}
       >
-        {repoStatus && (
-          <span className="branch-indicator">
-            <i className="ti ti-git-branch" />
-            {repoStatus.branch}
-          </span>
-        )}
+        {repoStatus && <BranchSwitcher variant="indicator" />}
       </div>
 
       <TabStrip />
