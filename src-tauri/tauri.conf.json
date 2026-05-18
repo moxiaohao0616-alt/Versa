@@ -56,6 +56,7 @@
     },
     "updater": {
       "active": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxRjBGN0FCNjFBNDRDMzUKUldRMVRLUmhxL2Z3VVg1em5yTldHNjlnWlVZZ3ZEclJ4VFBQTmMxTTFpTEpjVlpteHRrTjR3cTEK",
       "endpoints": [
         "https://github.com/moxiaohao0616-alt/Versa/releases/latest/download/latest.json"
       ]
