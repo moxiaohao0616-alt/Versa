@@ -86,6 +86,7 @@ export const zh = {
     apply: '应用',
     refresh: '刷新',
     copy: '复制',
+    copied: '已复制',
     retry: '重试',
     search: '搜索',
     download: '下载',
@@ -115,6 +116,31 @@ export const zh = {
     changes: '代码变更',
     history: '提交历史',
     branches: '分支',
+    compare: '分支对比',
+  },
+
+  compare: {
+    base: '基准（base）',
+    head: '目标（head）',
+    swap: '互换',
+    n_commits: '{{n}} 个提交',
+    n_files: '{{n}} 个文件',
+    pick_two: '选两个分支开始对比',
+    same_branch: '请选不同的分支',
+    no_difference: '两个分支完全一致',
+    commits_in_head: '{{head}} 独有的提交',
+    files: '改动文件',
+    no_files: '没有改动文件',
+    select_file: '在左侧选一个文件查看 diff',
+    only_changes: '只看有改动的',
+    search_placeholder: '搜索文件…',
+    file_identical: '这个文件在两个分支上内容相同',
+    file_base_only: '这个文件只在 base 上存在（head 上已被删除）',
+    file_head_only: '这个文件只在 head 上存在（base 上还没有）',
+    newer: '较新',
+    newer_tooltip: '这一侧的最新提交时间晚于另一侧',
+    ai_pr: 'AI 写 PR 描述',
+    ai_pr_tooltip: '把这次对比的 commits + diff 喂给 AI，生成 GitHub PR 正文',
   },
 
   sidebar: {
@@ -131,6 +157,8 @@ export const zh = {
     commit_label: '提交说明',
     ai_generate: 'AI 生成',
     ai_generating: '生成中…',
+    ai_review: 'AI Review',
+    ai_review_tooltip: '让 AI 帮你 review 待提交的改动',
     workspace_clean: '工作区很干净',
     workspace_clean_sub: '没有未提交的改动',
     staged: '已暂存',
@@ -158,8 +186,12 @@ export const zh = {
     word_level_tooltip: '行内单词级高亮（开关）',
     ignore_whitespace: '忽略空白',
     ignore_whitespace_tooltip: '忽略空白差异（git diff -w）',
-    blame: 'Blame',
-    blame_tooltip: '查看这个文件的 blame（每行是谁、哪次改的）',
+    blame: '追溯',
+    blame_tooltip: '看这个文件每一行最后是谁、哪次改的',
+    file_history: '文件历史',
+    file_history_tooltip: '看这个文件被哪些 commit 动过',
+    side_by_side: '左右对比',
+    side_by_side_tooltip: '切换左右对比视图（旧版本 vs 新版本并排显示）',
     search_placeholder: '在 diff 中搜索…',
     search_count_none: '0 处',
     no_changes: '没有待提交的改动',
@@ -439,9 +471,48 @@ export const zh = {
   },
 
   blame: {
-    title: 'Blame · {{file}}',
+    title: '追溯 · {{file}}',
     loading: '分析中…',
     empty: '没有可分析的内容',
+    hint: '每行显示最后一次改它的提交。点任意行查看这一行的完整修改史。',
+    row_tooltip: '看这一行的完整修改史',
+  },
+
+  file_history: {
+    title: '文件历史',
+    empty: '这个文件还没有提交记录',
+    open_at_commit: '查看这个提交时的版本',
+    count: '共 {{n}} 个提交',
+  },
+
+  block_history: {
+    title: '代码段历史',
+    pill: '看 {{range}} 的历史',
+    pill_tooltip: '查看选中行的所有改动',
+    empty: '这段代码还没有改动过',
+    open_commit: '跳到这个提交',
+    count: '共 {{n}} 次改动',
+  },
+
+  ai_review: {
+    title: 'AI Code Review',
+    streaming: 'AI 正在分析…',
+    warming_up: '准备中…',
+    no_api_key: '没有配置 API Key，请先到设置里填上',
+    no_changes: '没有待 review 的改动',
+    empty_response: 'AI 没有返回内容，可能 provider 不支持流式或被限流，换个模型或重试',
+  },
+
+  ai_pr: {
+    title: 'AI 生成 PR 描述',
+  },
+
+  updater: {
+    available: '新版本 {{version}} 可用',
+    install_now: '立即升级',
+    installing: '安装中…',
+    install_done: '安装完成，正在重启…',
+    dismiss: '暂时忽略这次更新',
   },
 
   onboarding: {

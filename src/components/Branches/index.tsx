@@ -4,6 +4,44 @@ import { useStore, type BranchInfo, type TagInfo, type SubmoduleInfo } from '../
 import { MergeModal } from '../Merge'
 import { relTime } from '../../lib/relTime'
 
+/** Tiny hook: per-section collapsed flag persisted to localStorage so a
+ *  long list users prefer rolled up stays rolled up across launches.
+ *  `defaultCollapsed` only applies on first run — once the user has
+ *  explicitly toggled, their choice wins. */
+function useCollapsed(key: string, defaultCollapsed = false): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    const stored = localStorage.getItem(`versa.branches.collapsed.${key}`)
+    if (stored === '1') return true
+    if (stored === '0') return false
+    return defaultCollapsed
+  })
+  const toggle = () => setCollapsed(prev => {
+    const next = !prev
+    localStorage.setItem(`versa.branches.collapsed.${key}`, next ? '1' : '0')
+    return next
+  })
+  return [collapsed, toggle]
+}
+
+/** Section header rendered as a button so the whole row toggles, plus
+ *  a leading chevron that rotates with collapsed state. */
+function SectionHeader({
+  collapsed, onToggle, children,
+}: { collapsed: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <h3 className="branches-section-title">
+      <button
+        type="button"
+        className={`branches-section-toggle${collapsed ? ' is-collapsed' : ''}`}
+        onClick={onToggle}
+      >
+        <i className="ti ti-chevron-down" />
+        {children}
+      </button>
+    </h3>
+  )
+}
+
 export function BranchesView() {
   const { t } = useTranslation()
   const {
@@ -120,6 +158,7 @@ export function BranchesView() {
       <div className="branches-scroll">
         <BranchList
           title={`${t('branches.title_local')} · ${local.length}`}
+          storageKey="local"
           items={local}
           emptyText={t('branches.empty_local')}
           menuFor={menuFor}
@@ -131,6 +170,8 @@ export function BranchesView() {
         />
         <BranchList
           title={`${t('branches.title_remote')} · ${remote.length}`}
+          storageKey="remote"
+          defaultCollapsed
           items={remote}
           emptyText={t('branches.empty_remote')}
           menuFor={menuFor}
@@ -278,6 +319,10 @@ function match(name: string, filter: string): boolean {
 
 interface BranchListProps {
   title: string
+  /** localStorage key suffix for the collapsed flag. */
+  storageKey: string
+  /** Whether the section is collapsed on first launch (before any user toggle). */
+  defaultCollapsed?: boolean
   items: BranchInfo[]
   emptyText: string
   menuFor: string | null
@@ -292,7 +337,7 @@ interface BranchListProps {
 }
 
 function BranchList({
-  title, items, emptyText,
+  title, storageKey, defaultCollapsed = false, items, emptyText,
   menuFor, setMenuFor,
   onDoubleClick, onRename, onDelete, onMerge,
   deleteLabel,
@@ -300,10 +345,11 @@ function BranchList({
   const { t } = useTranslation()
   const finalDeleteLabel = deleteLabel ?? t('branches.delete_local')
   const hasAnyAction = !!(onRename || onDelete || onMerge)
+  const [collapsed, toggle] = useCollapsed(storageKey, defaultCollapsed)
   return (
     <section className="branches-section">
-      <h3 className="branches-section-title">{title}</h3>
-      {items.length === 0 ? (
+      <SectionHeader collapsed={collapsed} onToggle={toggle}>{title}</SectionHeader>
+      {collapsed ? null : items.length === 0 ? (
         <div className="branches-empty">{emptyText}</div>
       ) : (
         <div className="branches-list">
@@ -408,13 +454,17 @@ function TagsSection({ filter }: { filter: string }) {
     return tags.filter(t => t.name.toLowerCase().includes(q))
   }, [tags, filter])
 
+  const [tagsCollapsed, toggleTags] = useCollapsed('tags', true)
+
   if (loading) return null
   if (tags.length === 0) return null
 
   return (
     <section className="branches-section">
-      <h3 className="branches-section-title">{t('branches.title_tags')} · {filtered.length}</h3>
-      {filtered.length === 0 ? (
+      <SectionHeader collapsed={tagsCollapsed} onToggle={toggleTags}>
+        {t('branches.title_tags')} · {filtered.length}
+      </SectionHeader>
+      {tagsCollapsed ? null : filtered.length === 0 ? (
         <div className="branches-empty">{t('branches.empty_tags')}</div>
       ) : (
         <div className="branches-list">
@@ -555,6 +605,11 @@ function SubmodulesSection({ filter }: { filter: string }) {
     )
   }, [subs, filter])
 
+  // All hooks must run before any early return; otherwise React's hook
+  // order changes when `loading` flips and we get "Rendered more hooks
+  // than during the previous render."
+  const [subsCollapsed, toggleSubs] = useCollapsed('submodules', true)
+
   if (loading) return null
 
   const handleAdd = async () => {
@@ -572,13 +627,20 @@ function SubmodulesSection({ filter }: { filter: string }) {
   return (
     <section className="branches-section">
       <h3 className="branches-section-title">
-        {t('branches.title_submodules')} · {filtered.length}
+        <button
+          type="button"
+          className={`branches-section-toggle${subsCollapsed ? ' is-collapsed' : ''}`}
+          onClick={toggleSubs}
+        >
+          <i className="ti ti-chevron-down" />
+          {t('branches.title_submodules')} · {filtered.length}
+        </button>
         <button className="branches-add-btn" onClick={() => setAddOpen(true)} title={t('branches.add_submodule_title')}>
           <i className="ti ti-plus" />
         </button>
       </h3>
 
-      {filtered.length === 0 ? (
+      {subsCollapsed ? null : filtered.length === 0 ? (
         <div className="branches-empty">{subs.length === 0 ? t('branches.empty_no_subs') : t('branches.empty_no_match_subs')}</div>
       ) : (
         <div className="branches-list">

@@ -8,37 +8,78 @@ import { invoke } from '@tauri-apps/api/core'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '../../store'
 
+/** Pick the xterm palette based on the app theme.
+ *  - Dark: Tokyo-Night-ish, plays well on near-black bg
+ *  - Light: high-contrast solarized-ish, designed to read on cream bg
+ *  Background / foreground come from the same CSS custom properties
+ *  that drive the rest of the chrome, so themes stay in sync. */
 function xtermTheme(): ITheme {
-  const s = getComputedStyle(document.documentElement)
-  const get = (v: string) => s.getPropertyValue(v).trim()
-  const bg = get('--term-bg') || '#141412'
-  const fg = get('--term-fg') || 'rgba(255,255,255,0.82)'
-  const fg2 = get('--term-fg2') || 'rgba(255,255,255,0.3)'
-  const green = get('--green') || '#639922'
-  const isDark = bg.startsWith('#1') || bg.startsWith('#0') || bg === '#141412'
+  const css = getComputedStyle(document.documentElement)
+  const v = (n: string, fallback: string) => css.getPropertyValue(n).trim() || fallback
+  const bg = v('--term-bg', '#1a1b26')
+  const fg = v('--term-fg', '#c0caf5')
+  // Heuristic: a hex starting with 0/1/2 (or rgba with dark first channel)
+  // means dark theme. Cheap and good enough.
+  const isDark = /^#[0-2]/i.test(bg) || /^rgba?\(\s*[0-9]{1,2}\s*,/.test(bg)
+
+  if (isDark) {
+    return {
+      background: bg,
+      foreground: fg,
+      cursor: '#7aa2f7',
+      cursorAccent: bg,
+      selectionBackground: '#33467c',
+      black:         '#15161e',
+      brightBlack:   '#414868',
+      red:           '#f7768e',
+      brightRed:     '#ff8b9e',
+      green:         '#9ece6a',
+      brightGreen:   '#b8e07e',
+      yellow:        '#e0af68',
+      brightYellow:  '#ffc586',
+      blue:          '#7aa2f7',
+      brightBlue:    '#9eb8ff',
+      magenta:       '#bb9af7',
+      brightMagenta: '#d2b4ff',
+      cyan:          '#7dcfff',
+      brightCyan:    '#a4d8ff',
+      white:         '#a9b1d6',
+      brightWhite:   '#c0caf5',
+    }
+  }
+  // Light palette — darker, more saturated ANSI shades so they're readable
+  // on a cream / white background. Inspired by GitHub Light + Solarized.
   return {
     background: bg,
     foreground: fg,
-    cursor: green,
+    cursor: '#0969da',
     cursorAccent: bg,
-    selectionBackground: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
-    black: isDark ? '#1a1a18' : '#1a1a18',
-    brightBlack: fg2,
-    white: isDark ? '#e8e8e4' : '#f5f5f3',
-    brightWhite: fg,
-    green,
-    brightGreen: '#7db82a',
-    red: '#e24b4a',
-    brightRed: '#f09595',
-    yellow: '#c8922a',
-    brightYellow: '#d4aa50',
-    blue: '#3a7fc1',
-    brightBlue: '#5a9fd4',
-    magenta: '#9a6ab0',
-    brightMagenta: '#b088c4',
-    cyan: '#2a9a8a',
-    brightCyan: '#3ab8a8',
+    selectionBackground: 'rgba(9, 105, 218, 0.18)',
+    black:         '#24292f',
+    brightBlack:   '#57606a',
+    red:           '#cf222e',
+    brightRed:     '#a40e26',
+    green:         '#1a7f37',
+    brightGreen:   '#116329',
+    yellow:        '#9a6700',
+    brightYellow:  '#7d4e00',
+    blue:          '#0969da',
+    brightBlue:    '#0550ae',
+    magenta:       '#8250df',
+    brightMagenta: '#6639ba',
+    cyan:          '#1b7c83',
+    brightCyan:    '#136061',
+    white:         '#6e7781',
+    brightWhite:   '#24292f',
   }
+}
+
+/** base64 → Uint8Array. Browser has atob for the decode; we wrap it. */
+function decodeB64(s: string): Uint8Array {
+  const bin = atob(s)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
 }
 
 export function Terminal() {
@@ -48,15 +89,13 @@ export function Terminal() {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
-  /** Exposed so a separate effect can run commands queued via store. */
-  const runCommandRef = useRef<((cmd: string) => Promise<void>) | null>(null)
-  const sessionId = useRef(`s${Math.random().toString(36).slice(2)}`)
-  const lineBuffer = useRef('')
-  const cursorPos = useRef(0)   // logical position within lineBuffer
-  const history = useRef<string[]>([])
-  const historyIdx = useRef(-1)
-  const savedLine = useRef('')
-  const [panelHeight, setPanelHeight] = useState(220)
+  // Active session id. We re-generate it on each mount-effect run (rather
+  // than pinning to a useRef initial value) so React 18 strict-mode's
+  // double-mount in dev doesn't have mount #2 inherit mount #1's exit
+  // event — the previous session's [shell exited] used to land in the
+  // fresh listener and print spuriously above the live prompt.
+  const sessionId = useRef<string>('')
+  const [panelHeight, setPanelHeight] = useState(280)
   const [dragging, setDragging] = useState(false)
   const dragState = useRef<{ startY: number; startH: number } | null>(null)
 
@@ -70,7 +109,7 @@ export function Terminal() {
     const onMove = (ev: MouseEvent) => {
       if (!dragState.current) return
       const dy = dragState.current.startY - ev.clientY
-      const next = Math.max(80, Math.min(window.innerHeight * 0.7, dragState.current.startH + dy))
+      const next = Math.max(80, Math.min(window.innerHeight * 0.75, dragState.current.startH + dy))
       setPanelHeight(next)
     }
     const onUp = () => {
@@ -85,7 +124,6 @@ export function Terminal() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // Sync xterm theme when app theme changes
   useEffect(() => {
     if (xtermRef.current) xtermRef.current.options.theme = xtermTheme()
   }, [theme])
@@ -93,21 +131,26 @@ export function Terminal() {
   // Refit after height change (after DOM has updated)
   useEffect(() => {
     fitRef.current?.fit()
+    const term = xtermRef.current
+    if (term) {
+      invoke('pty_resize', {
+        sessionId: sessionId.current,
+        rows: term.rows,
+        cols: term.cols,
+      }).catch(() => {})
+    }
   }, [panelHeight])
 
   // Drain external commands queued via store.pendingTerminalCommand —
-  // typically from Sidebar's project quick-run buttons.
+  // typically from Sidebar's project quick-run buttons. With a real PTY,
+  // we just type them in (followed by newline) — the shell handles
+  // execution and we'll see the output naturally.
   useEffect(() => {
     if (!pendingCmd) return
-    const term = xtermRef.current
-    const run = runCommandRef.current
-    if (!term || !run) return
-    // Echo the command at the prompt so the user sees what's running, then
-    // execute via the same path keyboard input takes. The line buffer stays
-    // empty — these don't interact with the user's typed input.
-    term.write(pendingCmd)
-    term.writeln('')
-    run(pendingCmd)
+    invoke('pty_write', {
+      sessionId: sessionId.current,
+      data: pendingCmd + '\n',
+    }).catch(() => {})
     useStore.getState().consumeTerminalCommand()
   }, [pendingCmd])
 
@@ -116,11 +159,14 @@ export function Terminal() {
 
     const term = new XTerm({
       theme: xtermTheme(),
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-      fontSize: 12,
-      lineHeight: 1.6,
+      fontFamily: '"JetBrainsMono Nerd Font", "JetBrains Mono", "MesloLGS NF", "Fira Code", "Cascadia Code", "SF Mono", monospace',
+      fontSize: 13,
+      lineHeight: 1.4,
       cursorBlink: true,
-      scrollback: 2000,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      allowProposedApi: true,
+      convertEol: false, // PTY emits raw bytes; let \r\n through verbatim
     })
 
     const fit = new FitAddon()
@@ -129,150 +175,70 @@ export function Terminal() {
     term.open(containerRef.current)
     xtermRef.current = term
     fitRef.current = fit
-    requestAnimationFrame(() => fit.fit())
 
-    prompt(term)
+    // Fresh session id per effect run — see ref declaration for why.
+    const sid = `s${Math.random().toString(36).slice(2)}`
+    sessionId.current = sid
+    let unOut: (() => void) | null = null
+    let unExit: (() => void) | null = null
+    let disposeOnData: { dispose: () => void } | null = null
+    let disposeOnResize: { dispose: () => void } | null = null
 
-    const runCommand = async (cmd: string) => {
-      if (cmd.trim() === 'clear') {
-        term.write('\x1b[3J\x1b[2J\x1b[H')
-        prompt(term)
+    requestAnimationFrame(async () => {
+      fit.fit()
+      // Falls back to the user's home dir via the shell's own `cd` on
+      // startup (login shells `cd $HOME` by default) when no repo is open.
+      const cwd = useStore.getState().repoPath ?? ''
+
+      try {
+        await invoke('pty_open', {
+          sessionId: sid,
+          cwd,
+          rows: term.rows,
+          cols: term.cols,
+        })
+      } catch (e) {
+        term.writeln(`\x1b[31mFailed to open PTY: ${e}\x1b[0m`)
         return
       }
-      try {
-        // Re-read repoPath at call time: Terminal is mounted once but the
-        // active tab (and thus cwd) can change.
-        const cwd = useStore.getState().repoPath ?? '/'
-        const code = await invoke<number>('run_shell', {
-          sessionId: sessionId.current,
-          cmd,
-          cwd,
-        })
-        if (code !== 0) term.writeln(`\x1b[33m[exit ${code}]\x1b[0m`)
-      } catch (e) {
-        term.writeln(`\x1b[31mError: ${e}\x1b[0m`)
-      }
-      prompt(term)
-      if (cmd.trim().startsWith('git ')) useStore.getState().refreshRepo()
-    }
-    runCommandRef.current = runCommand
 
-    term.onData((data) => {
-      const buf = lineBuffer.current
-      const pos = cursorPos.current
-      const tail = buf.slice(pos)           // text after cursor
-      const tailW = strWidth(tail)          // display columns of tail
+      // PTY → xterm
+      const outFn = await listen<string>(`pty:out:${sid}`, evt => {
+        const bytes = decodeB64(evt.payload)
+        // xterm.write accepts Uint8Array for raw bytes.
+        term.write(bytes)
+      })
+      unOut = outFn
 
-      if (data === '\r') { // Enter
-        const cmd = buf
-        lineBuffer.current = ''
-        cursorPos.current = 0
-        term.writeln('')
-        if (cmd.trim()) {
-          history.current.unshift(cmd)
-          historyIdx.current = -1
-          savedLine.current = ''
-          runCommand(cmd)
-        } else {
-          prompt(term)
-        }
+      // Keep an exit listener so we can extend behavior later (auto-reopen
+      // banner, restore button etc.), but stay silent for now — the prompt
+      // is gone, the user can see that. Spurious lines during dev
+      // strict-mode double mounts were the original reason this fires.
+      const exitFn = await listen<void>(`pty:exit:${sid}`, () => {})
+      unExit = exitFn
 
-      } else if (data === '\x7f') { // Backspace — delete char before cursor
-        if (pos > 0) {
-          const ch = buf[pos - 1]
-          const cw = charWidth(ch)
-          const newBuf = buf.slice(0, pos - 1) + tail
-          lineBuffer.current = newBuf
-          cursorPos.current = pos - 1
-          // move back cw cols, write tail, erase cw extra cols, reposition
-          term.write(`\x1b[${cw}D` + tail + ' '.repeat(cw) + `\x1b[${tailW + cw}D`)
-        }
+      // xterm input → PTY
+      disposeOnData = term.onData(data => {
+        invoke('pty_write', { sessionId: sid, data }).catch(() => {})
+      })
 
-      } else if (data === '\x1b[D' || data === '\x1b[1D') { // ← Left
-        if (pos > 0) {
-          const cw = charWidth(buf[pos - 1])
-          cursorPos.current = pos - 1
-          term.write(`\x1b[${cw}D`)
-        }
-
-      } else if (data === '\x1b[C' || data === '\x1b[1C') { // → Right
-        if (pos < buf.length) {
-          const cw = charWidth(buf[pos])
-          cursorPos.current = pos + 1
-          term.write(`\x1b[${cw}C`)
-        }
-
-      } else if (data === '\x1b[A') { // ↑ Up — history
-        if (historyIdx.current === -1) savedLine.current = buf
-        historyIdx.current = Math.min(historyIdx.current + 1, history.current.length - 1)
-        const val = history.current[historyIdx.current] ?? ''
-        overwriteLine(term, val)
-        lineBuffer.current = val
-        cursorPos.current = val.length
-
-      } else if (data === '\x1b[B') { // ↓ Down — history
-        historyIdx.current = Math.max(historyIdx.current - 1, -1)
-        const val = historyIdx.current >= 0
-          ? (history.current[historyIdx.current] ?? '')
-          : savedLine.current
-        overwriteLine(term, val)
-        lineBuffer.current = val
-        cursorPos.current = val.length
-
-      } else if (data === '\x01') { // Ctrl+A — 行首
-        if (pos > 0) {
-          term.write(`\x1b[${strWidth(buf.slice(0, pos))}D`)
-          cursorPos.current = 0
-        }
-
-      } else if (data === '\x05') { // Ctrl+E — 行尾
-        if (pos < buf.length) {
-          term.write(`\x1b[${tailW}C`)
-          cursorPos.current = buf.length
-        }
-
-      } else if (data === '\x03') { // Ctrl+C — 取消
-        term.writeln('^C')
-        lineBuffer.current = ''
-        cursorPos.current = 0
-        historyIdx.current = -1
-        prompt(term)
-
-      } else if (data === '\x0c') { // Ctrl+L — 清屏
-        term.write('\x1b[3J\x1b[2J\x1b[H')
-        prompt(term)
-
-      } else if (data.startsWith('\x1b')) {
-        // 忽略其他 escape 序列（Home/End/PageUp/Delete 等）
-
-      } else {
-        // 可打印字符（ASCII、中文、emoji 等）：在光标处插入
-        const newBuf = buf.slice(0, pos) + data + tail
-        lineBuffer.current = newBuf
-        cursorPos.current = pos + data.length
-        if (tailW > 0) {
-          // 写入字符 + 尾部，然后把光标退回到插入点之后
-          term.write(data + tail + `\x1b[${tailW}D`)
-        } else {
-          term.write(data)
-        }
-      }
+      // xterm resize → PTY resize
+      disposeOnResize = term.onResize(({ rows, cols }) => {
+        invoke('pty_resize', { sessionId: sid, rows, cols }).catch(() => {})
+      })
     })
-
-    const sid = sessionId.current
-    const unOut = listen<string>(`term:out:${sid}`, e => term.writeln(e.payload))
-    const unErr = listen<string>(`term:err:${sid}`, e =>
-      term.writeln(`\x1b[31m${e.payload}\x1b[0m`)
-    )
 
     const ro = new ResizeObserver(() => fitRef.current?.fit())
     ro.observe(containerRef.current!)
 
     return () => {
-      term.dispose()
       ro.disconnect()
-      unOut.then(fn => fn())
-      unErr.then(fn => fn())
+      disposeOnData?.dispose()
+      disposeOnResize?.dispose()
+      unOut?.()
+      unExit?.()
+      invoke('pty_close', { sessionId: sid }).catch(() => {})
+      term.dispose()
     }
   }, [])
 
@@ -298,39 +264,4 @@ export function Terminal() {
       <div ref={containerRef} className="term-xterm" />
     </div>
   )
-}
-
-function prompt(term: XTerm) {
-  term.write('\x1b[32m$\x1b[0m ')
-}
-
-function overwriteLine(term: XTerm, val: string) {
-  term.write(`\r\x1b[2K\x1b[32m$\x1b[0m ${val}`)
-}
-
-// Returns the display width (terminal columns) of a single character
-function charWidth(ch: string): number {
-  const cp = ch.codePointAt(0) ?? 0
-  if (cp < 0x1100) return 1
-  if (
-    cp <= 0x115F ||                          // Hangul Jamo
-    (cp >= 0x2E80 && cp <= 0x303E) ||        // CJK Radicals / Kangxi
-    (cp >= 0x3040 && cp <= 0xA4CF) ||        // Hiragana / Katakana / CJK Unified
-    (cp >= 0xA960 && cp <= 0xA97F) ||        // Hangul Extension-A
-    (cp >= 0xAC00 && cp <= 0xD7FF) ||        // Hangul Syllables
-    (cp >= 0xF900 && cp <= 0xFAFF) ||        // CJK Compatibility Ideographs
-    (cp >= 0xFF01 && cp <= 0xFF60) ||        // Fullwidth ASCII & punctuation
-    (cp >= 0xFFE0 && cp <= 0xFFE6) ||        // Fullwidth signs
-    (cp >= 0x1F300 && cp <= 0x1F9FF) ||      // Emoji / Misc Symbols
-    (cp >= 0x20000 && cp <= 0x2FFFD) ||      // CJK Extension B-F
-    (cp >= 0x30000 && cp <= 0x3FFFD)         // CJK Extension G+
-  ) return 2
-  return 1
-}
-
-// Total display width of a string
-function strWidth(s: string): number {
-  let w = 0
-  for (const ch of s) w += charWidth(ch)
-  return w
 }

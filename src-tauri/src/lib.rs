@@ -5,9 +5,11 @@
 
 mod commands;
 mod menu;
+mod pty;
 mod watcher;
 
 use commands::*;
+use pty::PtyRegistry;
 use watcher::WatcherRegistry;
 
 #[tauri::command]
@@ -35,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(WatcherRegistry::default())
+        .manage(PtyRegistry::default())
         .setup(|app| {
             let m = menu::build(app.handle())?;
             app.set_menu(m)?;
@@ -44,13 +47,14 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
-            open_repo, save_progress, get_diff, get_history,
+            open_repo, save_progress, get_diff, get_history, get_file_history, get_block_history,
             create_branch, switch_branch, stage_file, unstage_file, discard_file,
             get_branches, run_shell, git_push, git_pull, git_clone,
             get_graph, checkout_commit, get_commit_files,
             get_conflicts, get_conflict_content, resolve_conflict,
             abort_merge, continue_merge,
             ai_generate_commit_message, ai_resolve_conflict, ai_explain_commit,
+            ai_review_staged, ai_pr_description,
             cancel_ai_stream,
             run_rebase, abort_rebase, continue_rebase,
             revert_commit, continue_revert, abort_revert,
@@ -63,8 +67,11 @@ pub fn run() {
             list_branches, checkout_remote_branch,
             rename_branch, delete_branch, delete_remote_branch,
             analyze_merge, ai_analyze_merge_risk, ai_analyze_file_conflict, merge_branch,
+            compare_branches, compare_trees,
             find_commit_by_prefix, find_commit_depth,
             start_watching, stop_watching,
+            // Real PTY-backed terminal
+            pty::pty_open, pty::pty_write, pty::pty_resize, pty::pty_close,
             // Round 1: refs + remotes
             reset_to_commit, git_fetch,
             list_remotes, add_remote, remove_remote, rename_remote, set_remote_url,

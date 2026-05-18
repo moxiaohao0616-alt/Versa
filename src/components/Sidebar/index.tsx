@@ -4,6 +4,7 @@ import { useStore } from '../../store'
 import { StashModal } from '../Stash'
 import { ReflogModal } from '../Reflog'
 import { GitProgressBar } from '../GitProgressBar'
+import { AIReviewModal } from '../AIReview'
 
 export function Sidebar() {
   const { t } = useTranslation()
@@ -22,6 +23,7 @@ export function Sidebar() {
 
   const [stashOpen, setStashOpen] = useState(false)
   const [reflogOpen, setReflogOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
@@ -264,15 +266,25 @@ export function Sidebar() {
               <div className="commit-area">
                 <div className="commit-label-row">
                   <span className="label">{t('sidebar.commit_label')}</span>
-                  <button
-                    className="ai-btn"
-                    title={t('sidebar.ai_generate')}
-                    onClick={generateCommitMessage}
-                    disabled={aiGenerating}
-                  >
-                    <i className={`ti ${aiGenerating ? 'ti-loader-2' : 'ti-sparkles'}`} />
-                    {aiGenerating ? t('sidebar.ai_generating') : t('sidebar.ai_generate')}
-                  </button>
+                  <div className="ai-btn-group">
+                    <button
+                      className="ai-btn"
+                      title={t('sidebar.ai_review_tooltip')}
+                      onClick={() => setReviewOpen(true)}
+                    >
+                      <i className="ti ti-eye-search" />
+                      {t('sidebar.ai_review')}
+                    </button>
+                    <button
+                      className="ai-btn"
+                      title={t('sidebar.ai_generate')}
+                      onClick={generateCommitMessage}
+                      disabled={aiGenerating}
+                    >
+                      <i className={`ti ${aiGenerating ? 'ti-loader-2' : 'ti-sparkles'}`} />
+                      {aiGenerating ? t('sidebar.ai_generating') : t('sidebar.ai_generate')}
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   className="commit-input"
@@ -331,6 +343,7 @@ export function Sidebar() {
 
       {stashOpen && <StashModal onClose={() => setStashOpen(false)} />}
       {reflogOpen && <ReflogModal onClose={() => setReflogOpen(false)} />}
+      {reviewOpen && <AIReviewModal onClose={() => setReviewOpen(false)} />}
     </aside>
   )
 }

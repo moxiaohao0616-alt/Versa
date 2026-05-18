@@ -85,6 +85,7 @@ export const en: Translations = {
     apply: 'Apply',
     refresh: 'Refresh',
     copy: 'Copy',
+    copied: 'Copied',
     retry: 'Retry',
     search: 'Search',
     download: 'Download',
@@ -114,6 +115,31 @@ export const en: Translations = {
     changes: 'Changes',
     history: 'History',
     branches: 'Branches',
+    compare: 'Compare',
+  },
+
+  compare: {
+    base: 'Base',
+    head: 'Head',
+    swap: 'Swap',
+    n_commits: '{{n}} commit(s)',
+    n_files: '{{n}} file(s)',
+    pick_two: 'Pick two branches to compare',
+    same_branch: 'Pick a different branch',
+    no_difference: 'These branches are identical',
+    commits_in_head: 'Commits in {{head}}',
+    files: 'Files changed',
+    no_files: 'No files changed',
+    select_file: 'Pick a file on the left to view its diff',
+    only_changes: 'Only changed',
+    search_placeholder: 'Filter files…',
+    file_identical: 'File content is identical on both branches',
+    file_base_only: 'File only exists on base (deleted on head)',
+    file_head_only: 'File only exists on head (new on this side)',
+    newer: 'newer',
+    newer_tooltip: 'This side\'s tip commit is more recent than the other',
+    ai_pr: 'AI PR description',
+    ai_pr_tooltip: 'Feed these commits + diff to AI and get a GitHub PR body',
   },
 
   sidebar: {
@@ -130,6 +156,8 @@ export const en: Translations = {
     commit_label: 'Commit message',
     ai_generate: 'AI generate',
     ai_generating: 'Generating…',
+    ai_review: 'AI Review',
+    ai_review_tooltip: 'Have the AI review your staged changes before you commit',
     workspace_clean: 'Clean working tree',
     workspace_clean_sub: 'No uncommitted changes',
     staged: 'Staged',
@@ -159,6 +187,10 @@ export const en: Translations = {
     ignore_whitespace_tooltip: 'Ignore whitespace differences (git diff -w)',
     blame: 'Blame',
     blame_tooltip: 'Show who wrote each line and when',
+    file_history: 'File history',
+    file_history_tooltip: 'Commits that touched this file',
+    side_by_side: 'Split',
+    side_by_side_tooltip: 'Toggle side-by-side view (old vs new in two columns)',
     search_placeholder: 'Search in diff…',
     search_count_none: '0 matches',
     no_changes: 'No uncommitted changes',
@@ -441,6 +473,45 @@ export const en: Translations = {
     title: 'Blame · {{file}}',
     loading: 'Analyzing…',
     empty: 'Nothing to analyze',
+    hint: 'Each row shows the last commit that touched that line. Click any row to see that line\'s full change history.',
+    row_tooltip: 'Show every commit that touched this line',
+  },
+
+  file_history: {
+    title: 'File history',
+    empty: 'No commits touched this file yet',
+    open_at_commit: 'Open this file at that commit',
+    count: '{{n}} commit(s)',
+  },
+
+  block_history: {
+    title: 'Block history',
+    pill: 'History for {{range}}',
+    pill_tooltip: 'Show every commit that touched the selected lines',
+    empty: 'No commit has touched this range',
+    open_commit: 'Jump to this commit',
+    count: '{{n}} commit(s)',
+  },
+
+  ai_review: {
+    title: 'AI Code Review',
+    streaming: 'AI is analyzing…',
+    warming_up: 'Warming up…',
+    no_api_key: 'AI is not configured. Open Settings to add an API key.',
+    no_changes: 'Nothing to review',
+    empty_response: 'AI returned nothing. Provider may not support streaming or you hit a rate limit. Try a different model.',
+  },
+
+  ai_pr: {
+    title: 'AI PR description',
+  },
+
+  updater: {
+    available: 'Versa {{version}} is available',
+    install_now: 'Install',
+    installing: 'Installing…',
+    install_done: 'Installed — relaunching…',
+    dismiss: 'Hide this update',
   },
 
   onboarding: {

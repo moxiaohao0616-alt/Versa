@@ -10,6 +10,8 @@ import { Terminal } from './components/Terminal'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { Settings } from './components/Settings'
 import { BranchesView } from './components/Branches'
+import { UpdateBanner } from './components/UpdateBanner'
+import { CompareView } from './components/Compare'
 import { GraphView } from './components/Graph'
 import { ConflictView } from './components/Conflict'
 import { TabStrip } from './components/TabStrip'
@@ -312,6 +314,7 @@ export default function App() {
         {repoStatus && <BranchSwitcher variant="indicator" />}
       </div>
 
+      <UpdateBanner />
       <TabStrip />
 
       {!repoPath ? (
@@ -328,6 +331,7 @@ export default function App() {
               && repoStatus?.state !== 'cherry-picking'
               && activeTab !== 'branches'
               && activeTab !== 'history'
+              && activeTab !== 'compare'
             const rsVisible = rightSidebarOpen && inNormalView
             return (
           <div className={`app-body ${rsVisible ? 'has-right' : ''}`}>
@@ -335,6 +339,7 @@ export default function App() {
               <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => setSettingsOpen(false)} />
               <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => setSettingsOpen(false)} />
               <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => setSettingsOpen(false)} />
+              <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} onClick={() => setSettingsOpen(false)} />
               <div className="spacer" />
               {inNormalView && (
                 <button
@@ -388,6 +393,7 @@ export default function App() {
                   <main className={`main-area${activeTab !== 'changes' ? ' settings-full' : ''}`}>
                     {activeTab === 'branches' ? <BranchesView />
                       : activeTab === 'history' ? <GraphView />
+                      : activeTab === 'compare' ? <CompareView />
                       : <DiffView />}
                   </main>
                   {rsVisible && <RightSidebar />}
@@ -420,7 +426,7 @@ function IconBtn({
   icon, tab, label, onClick
 }: {
   icon: string
-  tab?: 'changes' | 'history' | 'branches'
+  tab?: 'changes' | 'history' | 'branches' | 'compare'
   label: string
   onClick?: () => void
 }) {

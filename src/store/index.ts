@@ -347,7 +347,7 @@ interface RepoSnapshot {
   diff: DiffResult[]
   commits: CommitInfo[]
   commitMessage: string
-  activeTab: 'changes' | 'history' | 'branches'
+  activeTab: 'changes' | 'history' | 'branches' | 'compare'
   conflicts: ConflictFile[]
   selectedConflictFile: string | null
   conflictContent: ConflictContent | null
@@ -434,7 +434,7 @@ interface VersaState {
   recentRepos: RecentRepo[]
 
   // UI
-  activeTab: 'changes' | 'history' | 'branches'
+  activeTab: 'changes' | 'history' | 'branches' | 'compare'
   terminalOpen: boolean
   commitMessage: string
   loading: boolean
@@ -496,6 +496,7 @@ interface VersaState {
   gpgSign: boolean         // sign commits (-S); relies on user's git signing config
   diffIgnoreWhitespace: boolean   // pass `ignore_whitespace=true` to get_diff
   diffWordLevel: boolean   // show inline word-level highlight inside changed lines
+  diffSideBySide: boolean  // render the diff as two columns instead of unified
 
   // Command queued for the embedded Terminal to pick up and run. Cleared by
   // the Terminal once consumed.
@@ -587,6 +588,7 @@ interface VersaState {
   setGpgSign: (on: boolean) => void
   setDiffIgnoreWhitespace: (on: boolean) => void
   setDiffWordLevel: (on: boolean) => void
+  setDiffSideBySide: (on: boolean) => void
   /** Auto-expand graphLimit until `sha` is in the loaded window. Returns idx, or -1. */
   locateCommit: (sha: string) => Promise<number>
   loadBisectStatus: () => Promise<void>
@@ -647,6 +649,7 @@ export const useStore = create<VersaState>((set, get) => ({
   gpgSign: localStorage.getItem('versa:gpgSign') === '1',
   diffIgnoreWhitespace: localStorage.getItem('versa:diffIgnoreWhitespace') === '1',
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
+  diffSideBySide: localStorage.getItem('versa:diffSideBySide') === '1',
   bisectStatus: null,
   currentAiStreamId: null,
   diff: [],
@@ -1497,6 +1500,10 @@ export const useStore = create<VersaState>((set, get) => ({
     localStorage.setItem('versa:diffWordLevel', on ? '1' : '0')
     set({ diffWordLevel: on })
   },
+  setDiffSideBySide: (on) => {
+    localStorage.setItem('versa:diffSideBySide', on ? '1' : '0')
+    set({ diffSideBySide: on })
+  },
 
   loadBisectStatus: async () => {
     const { repoPath } = get()
@@ -1914,7 +1921,7 @@ function extractWithContext(blob: string, start: number, end: number, ctx: numbe
   return lines.slice(s, e).join('\n')
 }
 
-function diffsToUnifiedText(diffs: DiffResult[]): string {
+export function diffsToUnifiedText(diffs: DiffResult[]): string {
   const stripNL = (s: string) => s.endsWith('\n') ? s.slice(0, -1) : s
   return diffs.map(d => {
     const out: string[] = [`diff --git a/${d.file} b/${d.file}`]

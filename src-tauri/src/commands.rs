@@ -335,6 +335,220 @@ pub fn get_history(path: String, limit: usize) -> Result<Vec<CommitInfo>, String
     Ok(commits)
 }
 
+/// `git log -- <file>` semantics: walk commits, keep the ones whose tree
+/// differs from their parent at the requested pathspec. Most file histories
+/// are short; we cap at `limit` to keep the call bounded for hot paths
+/// (frequently-touched files in old repos).
+#[tauri::command]
+pub fn get_file_history(
+    path: String,
+    file: String,
+    limit: usize,
+) -> Result<Vec<CommitInfo>, String> {
+    let repo = Repository::open(&path).map_err(fe)?;
+    let mut revwalk = repo.revwalk().map_err(fe)?;
+    revwalk.push_head().map_err(fe)?;
+
+    let mut out = Vec::new();
+    for id_res in revwalk {
+        let id = match id_res {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        let commit = match repo.find_commit(id) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let tree = match commit.tree() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let parent_tree = if commit.parent_count() > 0 {
+            commit.parent(0).ok().and_then(|p| p.tree().ok())
+        } else {
+            None
+        };
+
+        let mut diff_opts = git2::DiffOptions::new();
+        diff_opts.pathspec(&file);
+        let diff = match repo.diff_tree_to_tree(
+            parent_tree.as_ref(),
+            Some(&tree),
+            Some(&mut diff_opts),
+        ) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        if diff.deltas().count() > 0 {
+            let id_str = commit.id().to_string();
+            let short_id = id_str[..7].to_string();
+            out.push(CommitInfo {
+                id: id_str,
+                short_id,
+                message: commit.summary().unwrap_or("").to_string(),
+                author: commit.author().name().unwrap_or("").to_string(),
+                time: commit.time().seconds(),
+            });
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHistoryEntry {
+    pub id: String,
+    pub short_id: String,
+    pub author: String,
+    pub time: i64,
+    pub message: String,
+    /// One or more hunks describing how this line range looked at this commit.
+    /// Reuses `DiffHunk` so the frontend can render with existing styles.
+    pub hunks: Vec<DiffHunk>,
+}
+
+/// Line-range history — `git log -L<start>,<end>:<file>`. Tracks the same
+/// region of a file backwards through renames and content moves. This is the
+/// real answer to "who touched this specific block of code?" — Blame tells
+/// you the LATEST author per line; -L tells you the WHOLE history of the
+/// range, with the diff of each commit that touched it.
+///
+/// libgit2 doesn't expose -L, so we shell out to `git` and parse.
+#[tauri::command]
+pub async fn get_block_history(
+    path: String,
+    file: String,
+    start: u32,
+    end: u32,
+    limit: usize,
+) -> Result<Vec<BlockHistoryEntry>, String> {
+    if start < 1 || end < start {
+        return Err(format!("行号范围非法：{}-{}", start, end))
+    }
+    // Custom format: a sentinel line that can't appear in a diff or message,
+    // followed by SHA / short / author / unix-time / subject (subject last so
+    // it can safely contain pipes — we only split N-1 times).
+    let pretty = "VERSA_COMMIT\x1f%H\x1f%h\x1f%an\x1f%at\x1f%s";
+    let l_arg = format!("-L{},{}:{}", start, end, file);
+    let n_arg = format!("-{}", limit.max(1));
+    let raw = run_git_capture(
+        &["log", "--no-color", "-n", n_arg.as_str().trim_start_matches('-'),
+          l_arg.as_str(),
+          &format!("--pretty=tformat:{}", pretty)],
+        &path,
+    ).await?;
+
+    let mut out: Vec<BlockHistoryEntry> = Vec::new();
+    let mut cur: Option<BlockHistoryEntry> = None;
+    let mut cur_hunk: Option<DiffHunk> = None;
+    // Track running line numbers for the current hunk (for left/right columns).
+    let mut old_ln: u32 = 0;
+    let mut new_ln: u32 = 0;
+
+    for line in raw.split('\n') {
+        if let Some(rest) = line.strip_prefix("VERSA_COMMIT\x1f") {
+            // Flush whatever we were building.
+            if let Some(mut e) = cur.take() {
+                if let Some(h) = cur_hunk.take() { e.hunks.push(h); }
+                out.push(e);
+            }
+            let parts: Vec<&str> = rest.splitn(5, '\x1f').collect();
+            if parts.len() == 5 {
+                let time = parts[3].parse::<i64>().unwrap_or(0);
+                cur = Some(BlockHistoryEntry {
+                    id: parts[0].to_string(),
+                    short_id: parts[1].to_string(),
+                    author: parts[2].to_string(),
+                    time,
+                    message: parts[4].to_string(),
+                    hunks: vec![],
+                });
+            }
+            continue
+        }
+        // git log -L emits these between commits / per-file; we don't render
+        // them as part of a hunk.
+        if line.starts_with("diff --git") || line.starts_with("--- ") || line.starts_with("+++ ") {
+            if let (Some(e), Some(h)) = (cur.as_mut(), cur_hunk.take()) {
+                e.hunks.push(h);
+            }
+            continue
+        }
+        if let Some(header) = line.strip_prefix("@@ ") {
+            // Flush previous hunk to the current commit.
+            if let (Some(e), Some(h)) = (cur.as_mut(), cur_hunk.take()) {
+                e.hunks.push(h);
+            }
+            // Parse "@@ -A,B +C,D @@" (B and D default to 1 if omitted).
+            if let Some((old, new)) = parse_hunk_header(header) {
+                old_ln = old; new_ln = new;
+            }
+            cur_hunk = Some(DiffHunk {
+                header: format!("@@ {}", header),
+                lines: vec![],
+            });
+            continue
+        }
+        // Inside a hunk: + / - / ' ' prefix lines
+        if cur_hunk.is_some() {
+            let (origin, content) = if let Some(rest) = line.strip_prefix('+') {
+                ('+', rest.to_string())
+            } else if let Some(rest) = line.strip_prefix('-') {
+                ('-', rest.to_string())
+            } else if let Some(rest) = line.strip_prefix(' ') {
+                (' ', rest.to_string())
+            } else {
+                // Skip unrecognized line (e.g. "\ No newline at end of file")
+                continue
+            };
+            let (ol, nl) = match origin {
+                '-' => { let v = old_ln; old_ln += 1; (Some(v), None) }
+                '+' => { let v = new_ln; new_ln += 1; (None, Some(v)) }
+                _   => {
+                    let o = old_ln; let n = new_ln;
+                    old_ln += 1; new_ln += 1;
+                    (Some(o), Some(n))
+                }
+            };
+            if let Some(h) = cur_hunk.as_mut() {
+                h.lines.push(DiffLine {
+                    origin,
+                    content: format!("{}\n", content),
+                    old_lineno: ol,
+                    new_lineno: nl,
+                });
+            }
+        }
+    }
+    if let Some(mut e) = cur.take() {
+        if let Some(h) = cur_hunk.take() { e.hunks.push(h); }
+        out.push(e);
+    }
+    Ok(out)
+}
+
+/// `@@ -A,B +C,D @@ optional context` → (A, C). B/D default to 1 when omitted.
+fn parse_hunk_header(s: &str) -> Option<(u32, u32)> {
+    // s starts after "@@ " — e.g. "-20,5 +20,15 @@ fn foo()"
+    let s = s.trim_start_matches("@@ ").trim_start();
+    let cut = s.find(" @@")?;
+    let head = &s[..cut];
+    let mut old_n: u32 = 0;
+    let mut new_n: u32 = 0;
+    for part in head.split_whitespace() {
+        if let Some(rest) = part.strip_prefix('-') {
+            old_n = rest.split(',').next()?.parse().ok()?;
+        } else if let Some(rest) = part.strip_prefix('+') {
+            new_n = rest.split(',').next()?.parse().ok()?;
+        }
+    }
+    Some((old_n, new_n))
+}
+
 #[tauri::command]
 pub fn create_branch(path: String, name: String) -> Result<(), String> {
     let repo = Repository::open(&path).map_err(fe)?;
@@ -386,10 +600,24 @@ pub async fn run_shell(
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
 
-    let mut child = Command::new("sh")
+    // Prefer the user's actual login shell so their aliases / PATH from
+    // ~/.zshrc / ~/.bashrc are honored. `-i` makes the shell interactive
+    // (sources rcfiles); `-c` runs the supplied command then exits.
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let mut child = Command::new(&shell)
+        .arg("-i")
         .arg("-c")
         .arg(&cmd)
         .current_dir(&cwd)
+        // Color env: convince CLI tools (ls, grep, git, fd, eza, …) that
+        // they're talking to a real TTY so they emit ANSI colors. xterm
+        // renders the escape sequences fine, so this round-trip works
+        // even without an actual PTY.
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("CLICOLOR", "1")
+        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -1254,14 +1482,9 @@ pub async fn ai_suggest_bisect_good(
         AI_BISECT_SUGGEST_SYSTEM_PROMPT, &user_prompt, 256,
     ).await?;
 
-    let cleaned = raw.trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    let v: serde_json::Value = serde_json::from_str(cleaned).map_err(|_| {
+    let v = extract_json_object(&raw).ok_or_else(||
         format!("AI 返回的不是 JSON：{}", trunc(&raw, 200))
-    })?;
+    )?;
     let sha_str = v["sha"].as_str().ok_or_else(|| "AI 返回缺少 sha 字段".to_string())?;
     let reason = v["reason"].as_str().unwrap_or("").to_string();
 
@@ -1812,6 +2035,306 @@ pub fn analyze_merge(path: String, target: String) -> Result<MergeAnalysis, Stri
         can_fast_forward: can_ff,
         already_merged: false,
     })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareFile {
+    /// New (head-side) path. For renames this is the destination.
+    pub path: String,
+    /// Old path for renames; None otherwise.
+    pub old_path: Option<String>,
+    /// "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange"
+    pub status: String,
+    pub hunks: Vec<DiffHunk>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareResult {
+    /// Commits in `head` that are not in `base` (excluding merge-base).
+    pub commits: Vec<CommitInfo>,
+    /// Combined diff of base..head, one entry per file.
+    pub files: Vec<CompareFile>,
+    /// Total lines added across all files.
+    pub added: usize,
+    /// Total lines removed across all files.
+    pub removed: usize,
+    /// The merge-base sha (or null if branches are unrelated).
+    pub merge_base: Option<String>,
+    /// Tip commit info for each branch, so the UI can show which side
+    /// is more recent and surface the author/date.
+    pub base_tip: Option<CommitInfo>,
+    pub head_tip: Option<CommitInfo>,
+}
+
+/// `git log base..head` + `git diff base...head` rolled into a single call.
+/// Both `base` and `head` accept anything `revparse_single` can resolve
+/// — local branch name (`feature/x`), remote (`origin/main`), tag, or sha.
+#[tauri::command]
+pub fn compare_branches(
+    path: String,
+    base: String,
+    head: String,
+) -> Result<CompareResult, String> {
+    let repo = Repository::open(&path).map_err(fe)?;
+
+    let base_oid = repo.revparse_single(&base).map_err(fe)?.id();
+    let head_oid = repo.revparse_single(&head).map_err(fe)?.id();
+
+    // Three-dot diff convention: compare base's merge-base with head
+    // against head's tree. This shows only what head added — the same
+    // diff GitHub shows on a PR page.
+    let mb = repo.merge_base(base_oid, head_oid).ok();
+    let diff_from = mb.unwrap_or(base_oid);
+
+    let from_tree = repo.find_commit(diff_from).map_err(fe)?.tree().map_err(fe)?;
+    let head_tree = repo.find_commit(head_oid).map_err(fe)?.tree().map_err(fe)?;
+
+    // ── Commit list: revwalk(head) excluding base
+    let mut walk = repo.revwalk().map_err(fe)?;
+    walk.push(head_oid).map_err(fe)?;
+    walk.hide(base_oid).map_err(fe)?;
+    let commits: Vec<CommitInfo> = walk
+        .filter_map(|id| id.ok())
+        .filter_map(|id| repo.find_commit(id).ok())
+        .map(|c| {
+            let id_str = c.id().to_string();
+            let short_id = id_str[..7].to_string();
+            CommitInfo {
+                id: id_str,
+                short_id,
+                message: c.summary().unwrap_or("").to_string(),
+                author: c.author().name().unwrap_or("").to_string(),
+                time: c.time().seconds(),
+            }
+        })
+        .collect();
+
+    // ── Combined diff (with rename detection so renames don't show as
+    //    delete+add)
+    let mut diff = repo
+        .diff_tree_to_tree(Some(&from_tree), Some(&head_tree), None)
+        .map_err(fe)?;
+    let mut find_opts = git2::DiffFindOptions::new();
+    find_opts.renames(true).copies(true);
+    let _ = diff.find_similar(Some(&mut find_opts));
+
+    use std::cell::RefCell;
+    let results: RefCell<Vec<CompareFile>> = RefCell::new(Vec::new());
+    let stats = RefCell::new((0usize, 0usize)); // (added, removed)
+
+    diff.foreach(
+        &mut |delta, _| {
+            let new_path = delta.new_file().path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let old_path = delta.old_file().path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let status = match delta.status() {
+                git2::Delta::Added       => "added",
+                git2::Delta::Deleted     => "deleted",
+                git2::Delta::Modified    => "modified",
+                git2::Delta::Renamed     => "renamed",
+                git2::Delta::Copied      => "copied",
+                git2::Delta::Typechange  => "typechange",
+                git2::Delta::Unmodified  => "unmodified",
+                _                        => "modified",
+            }.to_string();
+            // Use the path that exists on the head side; for deletions
+            // that's the old path.
+            let path = if delta.status() == git2::Delta::Deleted {
+                old_path.clone()
+            } else {
+                new_path.clone()
+            };
+            let mut r = results.borrow_mut();
+            if r.iter().all(|x| x.path != path) {
+                let old_path_opt = if status == "renamed" || status == "copied" {
+                    Some(old_path)
+                } else {
+                    None
+                };
+                r.push(CompareFile {
+                    path,
+                    old_path: old_path_opt,
+                    status,
+                    hunks: vec![],
+                    added: 0,
+                    removed: 0,
+                });
+            }
+            true
+        },
+        None,
+        Some(&mut |delta, hunk| {
+            let path = path_for_delta(&delta);
+            let header = String::from_utf8_lossy(hunk.header()).to_string();
+            let mut r = results.borrow_mut();
+            if let Some(file) = r.iter_mut().find(|x| x.path == path) {
+                file.hunks.push(DiffHunk { header, lines: vec![] });
+            }
+            true
+        }),
+        Some(&mut |delta, _hunk, line| {
+            let path = path_for_delta(&delta);
+            let content = String::from_utf8_lossy(line.content()).to_string();
+            match line.origin() {
+                '+' => stats.borrow_mut().0 += 1,
+                '-' => stats.borrow_mut().1 += 1,
+                _ => {}
+            }
+            let mut r = results.borrow_mut();
+            if let Some(file) = r.iter_mut().find(|x| x.path == path) {
+                match line.origin() {
+                    '+' => file.added += 1,
+                    '-' => file.removed += 1,
+                    _ => {}
+                }
+                if let Some(h) = file.hunks.last_mut() {
+                    h.lines.push(DiffLine {
+                        origin: line.origin(),
+                        content,
+                        old_lineno: line.old_lineno(),
+                        new_lineno: line.new_lineno(),
+                    });
+                }
+            }
+            true
+        }),
+    ).map_err(fe)?;
+
+    let (added, removed) = *stats.borrow();
+    let tip = |oid: git2::Oid| -> Option<CommitInfo> {
+        repo.find_commit(oid).ok().map(|c| {
+            let id = c.id().to_string();
+            let short_id = id[..7].to_string();
+            CommitInfo {
+                id,
+                short_id,
+                message: c.summary().unwrap_or("").to_string(),
+                author: c.author().name().unwrap_or("").to_string(),
+                time: c.time().seconds(),
+            }
+        })
+    };
+    Ok(CompareResult {
+        commits,
+        files: results.into_inner(),
+        added,
+        removed,
+        merge_base: mb.map(|o| o.to_string()),
+        base_tip: tip(base_oid),
+        head_tip: tip(head_oid),
+    })
+}
+
+/// Resolve a delta's "active" path — head-side path normally, old-side
+/// for deletions. Keeps line/hunk attribution consistent during the
+/// foreach walk.
+fn path_for_delta(delta: &git2::DiffDelta) -> String {
+    let new_path = delta.new_file().path()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let old_path = delta.old_file().path()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if delta.status() == git2::Delta::Deleted {
+        old_path
+    } else {
+        new_path
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareTreeEntry {
+    /// Full path from repo root, e.g. "src/lib/foo.rs".
+    pub path: String,
+    /// True for directories, false for blobs.
+    pub is_dir: bool,
+    /// Exists in the `base` checkout?
+    pub base_present: bool,
+    /// Exists in the `head` checkout?
+    pub head_present: bool,
+    /// Only meaningful when BOTH sides are present and the entry is a file:
+    /// "identical" if the blob OID matches, "modified" otherwise.
+    pub diff_status: Option<String>,
+}
+
+/// Beyond-Compare-style: flatten BOTH branches' complete file trees and
+/// for every path tell the frontend whether it exists on each side and
+/// (for files present on both) whether the blob is identical or modified.
+/// Empty repos or unrelated histories still work — the union of paths is
+/// computed regardless of merge-base.
+#[tauri::command]
+pub fn compare_trees(
+    path: String,
+    base: String,
+    head: String,
+) -> Result<Vec<CompareTreeEntry>, String> {
+    use std::collections::BTreeMap;
+    let repo = Repository::open(&path).map_err(fe)?;
+    let base_oid = repo.revparse_single(&base).map_err(fe)?.id();
+    let head_oid = repo.revparse_single(&head).map_err(fe)?.id();
+    let base_tree = repo.find_commit(base_oid).map_err(fe)?.tree().map_err(fe)?;
+    let head_tree = repo.find_commit(head_oid).map_err(fe)?.tree().map_err(fe)?;
+
+    type FlatMap = BTreeMap<String, (bool, git2::Oid)>;
+    fn flatten(repo: &Repository, tree: &git2::Tree, prefix: &str, out: &mut FlatMap) {
+        for entry in tree.iter() {
+            let name = entry.name().unwrap_or("").to_string();
+            if name.is_empty() { continue }
+            let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            let oid = entry.id();
+            match entry.kind() {
+                Some(git2::ObjectType::Tree) => {
+                    out.insert(path.clone(), (true, oid));
+                    if let Ok(sub) = repo.find_tree(oid) {
+                        flatten(repo, &sub, &path, out);
+                    }
+                }
+                Some(git2::ObjectType::Blob) => {
+                    out.insert(path, (false, oid));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut base_map: FlatMap = BTreeMap::new();
+    let mut head_map: FlatMap = BTreeMap::new();
+    flatten(&repo, &base_tree, "", &mut base_map);
+    flatten(&repo, &head_tree, "", &mut head_map);
+
+    // Union of paths
+    let mut all_paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for k in base_map.keys() { all_paths.insert(k.clone()); }
+    for k in head_map.keys() { all_paths.insert(k.clone()); }
+
+    let mut out = Vec::with_capacity(all_paths.len());
+    for path in all_paths {
+        let b = base_map.get(&path);
+        let h = head_map.get(&path);
+        let is_dir = b.map(|x| x.0).or_else(|| h.map(|x| x.0)).unwrap_or(false);
+        let diff_status: Option<String> = match (b, h) {
+            (Some((false, bo)), Some((false, ho))) => {
+                Some((if bo == ho { "identical" } else { "modified" }).to_string())
+            }
+            _ => None,
+        };
+        out.push(CompareTreeEntry {
+            path,
+            is_dir,
+            base_present: b.is_some(),
+            head_present: h.is_some(),
+            diff_status,
+        });
+    }
+    Ok(out)
 }
 
 const AI_MERGE_RISK_SYSTEM_PROMPT: &str = r#"你是资深工程师。用户即将把分支 target 合并到 current。下面是两边自共同祖先以来的改动。
@@ -2573,36 +3096,63 @@ async fn call_ai_stream(
     let mut accumulated = String::new();
     let mut buffer = String::new();
 
+    // Normalize CRLF → LF before searching for the SSE event separator so
+    // providers that emit \r\n\r\n (e.g. some OpenAI-compatible gateways)
+    // still parse correctly.
+    let normalize = |s: &str| s.replace("\r\n", "\n");
+
+    let drain_event = |event_str: &str,
+                       accumulated: &mut String,
+                       app: &tauri::AppHandle,
+                       event_name: &str| {
+        for line in event_str.lines() {
+            let line = line.trim();
+            let Some(data) = line.strip_prefix("data:") else { continue };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" { continue }
+            let delta = match provider {
+                "anthropic" => extract_anthropic_delta(data),
+                _ => extract_openai_delta(data),
+            };
+            if let Some(text) = delta {
+                accumulated.push_str(&text);
+                let _ = app.emit(event_name, serde_json::json!({ "delta": text }));
+            }
+        }
+    };
+
     let mut cancelled = false;
     'outer: while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::Relaxed) { cancelled = true; break }
         let chunk = chunk.map_err(fe)?;
-        let text = std::str::from_utf8(&chunk).map_err(|e| e.to_string())?;
-        buffer.push_str(text);
+        let text = normalize(std::str::from_utf8(&chunk).map_err(|e| e.to_string())?);
+        buffer.push_str(&text);
 
-        // SSE: events are separated by a blank line ("\n\n"); each event has
-        // one or more "data: ..." lines.
         while let Some(end) = buffer.find("\n\n") {
             if cancel.load(Ordering::Relaxed) { cancelled = true; break 'outer }
             let event_str = buffer[..end].to_string();
             buffer.drain(..end + 2);
-
-            for line in event_str.lines() {
-                let line = line.trim();
-                let Some(data) = line.strip_prefix("data:") else { continue };
-                let data = data.trim();
-                if data == "[DONE]" { continue }
-
-                let delta = match provider {
-                    "anthropic" => extract_anthropic_delta(data),
-                    _ => extract_openai_delta(data),
-                };
-                if let Some(text) = delta {
-                    accumulated.push_str(&text);
-                    let _ = app.emit(event_name, serde_json::json!({ "delta": text }));
-                }
-            }
+            drain_event(&event_str, &mut accumulated, app, event_name);
         }
+    }
+
+    // Drain whatever's left in the buffer (some providers don't emit a
+    // trailing blank line before EOF).
+    if !buffer.trim().is_empty() {
+        drain_event(&buffer, &mut accumulated, app, event_name);
+        buffer.clear();
+    }
+
+    // Last-ditch fallback: if SSE parsing produced nothing, the provider
+    // probably ignored `stream: true` and returned a plain chat-completions
+    // body. Try to parse it as a single JSON response.
+    if accumulated.is_empty() {
+        // Get whatever bytes are still around (we already drained, but the
+        // chunk loop may have appended new data to accumulated buffer).
+        // For now we just look at what was in `buffer` and the original
+        // body if buffer is empty. We don't have the original body anymore
+        // (we consumed the stream), so this is a soft fallback only.
+        let _ = app.emit(event_name, serde_json::json!({ "delta": "" }));
     }
 
     let _ = app.emit(
@@ -2759,6 +3309,124 @@ pub async fn ai_explain_commit(
     result
 }
 
+const AI_REVIEW_SYSTEM_PROMPT: &str =
+    "你是资深工程师，对一位同事即将提交的改动做 code review。要求：\n\
+     - 输出 markdown 段落，不要用代码块包裹整个回复\n\
+     - 用三个二级标题分块：## 潜在问题 / ## 风格与可读性 / ## 测试建议\n\
+     - 每块下用「- 」开头的项目符号，每条 1-2 句直击要害\n\
+     - 没有发现的块写「- 无明显问题。」一句话即可，不要硬凑\n\
+     - 引用文件名/函数名时用反引号包裹\n\
+     - 不夸赞、不寒暄、不复述 diff，直接给反馈\n\
+     - 中文输出";
+
+#[tauri::command]
+pub async fn ai_review_staged(
+    app: tauri::AppHandle,
+    provider: String,
+    api_key: String,
+    model: Option<String>,
+    base_url: Option<String>,
+    diff: String,
+    stream_id: String,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("没有配置 API Key，请先到设置里填上".to_string());
+    }
+    if diff.trim().is_empty() {
+        return Err("没有 staged 改动可供 review".to_string());
+    }
+
+    let truncated = if diff.len() > AI_DIFF_CHAR_CAP {
+        let mut s = diff[..AI_DIFF_CHAR_CAP].to_string();
+        s.push_str("\n\n[diff 过长，已截断]");
+        s
+    } else {
+        diff
+    };
+    let user_prompt = format!(
+        "请 review 下面的 staged diff：\n\n```diff\n{}\n```",
+        truncated
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .map_err(fe)?;
+    let event = format!("ai:stream:{}", stream_id);
+    let cancel = register_ai_cancel(&stream_id);
+    let result = call_ai_stream(
+        &client, &provider, &api_key, model.as_deref(), base_url.as_deref(),
+        AI_REVIEW_SYSTEM_PROMPT, &user_prompt, 1024, &app, &event, cancel,
+    ).await;
+    unregister_ai_cancel(&stream_id);
+    result
+}
+
+const AI_PR_DESC_SYSTEM_PROMPT: &str =
+    "你是资深工程师，需要把一组 commits + 合并 diff 写成一份合格的 GitHub PR 描述。\n\
+     输出 **markdown**，结构严格遵守：\n\n\
+     第一行是 PR 标题（不超过 70 字），不要带 markdown heading 符号\n\
+     第二行空行\n\
+     `## Summary`\n\
+     - 3-5 个项目符号，描述这次合并做了什么、为什么\n\n\
+     `## Test plan`\n\
+     - markdown checkbox 列表（`- [ ] xxx`），列出需要人工验证的事项\n\n\
+     约束：\n\
+     - 标题用动词开头，写「做了什么」，不是「这次 PR 是关于什么的」\n\
+     - 不要复述 commit 字面消息，要从 diff 看到「实际做的事」\n\
+     - 文件/函数名用反引号包裹\n\
+     - 不夹任何代码块、不要前言或后记、不要联想没发生的事\n\
+     - 中文输出";
+
+#[tauri::command]
+pub async fn ai_pr_description(
+    app: tauri::AppHandle,
+    provider: String,
+    api_key: String,
+    model: Option<String>,
+    base_url: Option<String>,
+    base_branch: String,
+    head_branch: String,
+    commits: Vec<String>,
+    diff: String,
+    stream_id: String,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("没有配置 API Key，请先到设置里填上".to_string());
+    }
+
+    let truncated_diff = if diff.len() > AI_DIFF_CHAR_CAP {
+        let mut s = diff[..AI_DIFF_CHAR_CAP].to_string();
+        s.push_str("\n\n[diff 过长，已截断]");
+        s
+    } else {
+        diff
+    };
+    let commits_block = if commits.is_empty() {
+        "(无 commit 列表)".to_string()
+    } else {
+        commits.iter().take(50).map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+    };
+
+    let user_prompt = format!(
+        "Base: {}\nHead: {}\n\nCommits ({} 个):\n{}\n\nDiff:\n```diff\n{}\n```\n\n请生成一份 PR 描述。",
+        base_branch, head_branch, commits.len(), commits_block, truncated_diff
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .map_err(fe)?;
+    let event = format!("ai:stream:{}", stream_id);
+    let cancel = register_ai_cancel(&stream_id);
+    let result = call_ai_stream(
+        &client, &provider, &api_key, model.as_deref(), base_url.as_deref(),
+        AI_PR_DESC_SYSTEM_PROMPT, &user_prompt, 1024, &app, &event, cancel,
+    ).await;
+    unregister_ai_cancel(&stream_id);
+    result
+}
+
 const AI_CONFLICT_SYSTEM_PROMPT: &str =
     "你是资深工程师，帮用户解决 git merge 冲突。分析\"我的版本 (ours)\"和\"对方版本 (theirs)\"\
      （必要时参考\"共同祖先 (base)\"），推荐采纳哪一方。\n\n\
@@ -2813,17 +3481,9 @@ pub async fn ai_resolve_conflict(
         AI_CONFLICT_SYSTEM_PROMPT, &user_prompt, 1024,
     ).await?;
 
-    // LLMs sometimes wrap JSON in code fences despite instructions — strip those.
-    let cleaned = raw
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-
-    let v: serde_json::Value = serde_json::from_str(cleaned).map_err(|_| {
+    let v = extract_json_object(&raw).ok_or_else(||
         format!("AI 返回的不是 JSON：{}", trunc(&raw, 200))
-    })?;
+    )?;
 
     let rec = v["recommendation"].as_str()
         .ok_or_else(|| "AI 返回缺少 recommendation 字段".to_string())?;
@@ -2854,6 +3514,48 @@ fn translate_provider_error(status: u16, body: &str, provider: &str) -> String {
         return format!("{} 服务异常 ({})，请稍后再试", provider, status);
     }
     format!("{} 返回 {}：{}", provider, status, trunc(body, 300))
+}
+
+/// Pull the first balanced `{...}` JSON object out of arbitrary text.
+/// Tolerates code-fence wrapping, prose before/after, and `{` characters
+/// inside strings (single backslash escape only — good enough for the
+/// AI-shaped JSON we deal with).
+fn extract_json_object(raw: &str) -> Option<serde_json::Value> {
+    let bytes = raw.as_bytes();
+    let mut start: Option<usize> = None;
+    let mut depth = 0_usize;
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str {
+            if escape { escape = false; continue }
+            if b == b'\\' { escape = true; continue }
+            if b == b'"' { in_str = false }
+            continue
+        }
+        match b {
+            b'"' => in_str = true,
+            b'{' => {
+                if start.is_none() { start = Some(i) }
+                depth += 1
+            }
+            b'}' => {
+                if depth > 0 { depth -= 1 }
+                if depth == 0 {
+                    if let Some(s) = start {
+                        let slice = &raw[s..=i];
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(slice) {
+                            return Some(v)
+                        }
+                        // Reset and keep scanning in case the first `{` was junk.
+                        start = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn trunc(s: &str, n: usize) -> String {

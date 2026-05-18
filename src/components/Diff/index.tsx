@@ -6,6 +6,9 @@ import type { DiffLine, DiffResult } from '../../store'
 import { buildHunkInlineDiffs, type CharSeg } from './wordDiff'
 import { detectLanguage, highlightLine } from './highlight'
 import { BlameModal } from '../Blame'
+import { FileHistoryModal } from '../FileHistory'
+import { BlockHistoryModal } from '../BlockHistory'
+import { SideBySideDiff } from './SideBySide'
 
 // Fixed row heights for the virtual list. Keep in sync with the CSS for each
 // item's content height — see .diff-file-header, .hunk-header, .diff-line.
@@ -91,13 +94,21 @@ export function DiffView() {
   const {
     diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit, repoPath,
     stageHunk, unstageHunk, showToast,
-    diffWordLevel, diffIgnoreWhitespace, setDiffWordLevel, setDiffIgnoreWhitespace,
+    diffWordLevel, diffIgnoreWhitespace, diffSideBySide,
+    setDiffWordLevel, setDiffIgnoreWhitespace, setDiffSideBySide,
   } = useStore()
   const hasFiles = (repoStatus?.files.length ?? 0) > 0
   // Hunk stage/unstage only makes sense for working-tree diffs (not viewing a
   // historical commit). Direction depends on which side we're looking at.
   const stageable: 'stage' | 'unstage' | null = selectedCommit ? null : (selectedFileStaged ? 'unstage' : 'stage')
   const [blameOpen, setBlameOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [blockHistory, setBlockHistory] = useState<{ start: number; end: number } | null>(null)
+  /** Pill that appears next to a text selection inside the diff. Reading
+   *  the actual line numbers from data-line-no on the surrounding row. */
+  const [selectionPill, setSelectionPill] = useState<
+    { x: number; y: number; start: number; end: number } | null
+  >(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHit, setSearchHit] = useState(0)
@@ -309,6 +320,65 @@ export function DiffView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [hunkIndices, fileIndices, currentHunkOrdinal, currentFileOrdinal, scrollTop, offsets])
 
+  // Watch text selection inside the diff container. When the user drags
+  // across one or more `.diff-line[data-line-no]` rows, pop a small pill
+  // next to the cursor offering "Block history for these lines". The pill
+  // uses the new-side line numbers so the lookup matches what the user
+  // sees in the right-hand gutter.
+  useEffect(() => {
+    const onSelChange = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        setSelectionPill(null)
+        return
+      }
+      const range = sel.getRangeAt(0)
+      const root = containerRef.current
+      if (!root || !root.contains(range.commonAncestorContainer)) {
+        setSelectionPill(null)
+        return
+      }
+      const findLineRow = (node: Node | null): HTMLElement | null => {
+        let n: Node | null = node
+        while (n && n !== root) {
+          if (n instanceof HTMLElement && n.classList.contains('diff-line')) return n
+          n = n.parentNode
+        }
+        return null
+      }
+      const startRow = findLineRow(range.startContainer)
+      const endRow = findLineRow(range.endContainer)
+      const collect = (start: HTMLElement, end: HTMLElement): number[] => {
+        const all = Array.from(root.querySelectorAll<HTMLElement>('.diff-line[data-line-no]'))
+        const startIdx = all.indexOf(start)
+        const endIdx = all.indexOf(end)
+        if (startIdx < 0 || endIdx < 0) return []
+        const [a, b] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+        const nums: number[] = []
+        for (let i = a; i <= b; i++) {
+          const n = Number(all[i].dataset.lineNo)
+          if (Number.isFinite(n) && n > 0) nums.push(n)
+        }
+        return nums
+      }
+      if (!startRow || !endRow) { setSelectionPill(null); return }
+      const nums = collect(startRow, endRow)
+      if (nums.length === 0) { setSelectionPill(null); return }
+      const lo = Math.min(...nums)
+      const hi = Math.max(...nums)
+      // Anchor pill to the end of the user's selection (mouse-up point).
+      const rect = range.getBoundingClientRect()
+      setSelectionPill({
+        x: Math.min(rect.right + 8, window.innerWidth - 200),
+        y: rect.bottom + 6,
+        start: lo,
+        end: hi,
+      })
+    }
+    document.addEventListener('selectionchange', onSelChange)
+    return () => document.removeEventListener('selectionchange', onSelChange)
+  }, [])
+
   return (
     <div className="diff-view">
       {diff.length > 0 && (
@@ -329,7 +399,12 @@ export function DiffView() {
             }}
           >
             <i className="ti ti-file-code" />
-            <bdo dir="ltr" className="diff-filename-path">{selectedFile}</bdo>
+            {/* Wrapper does the RTL truncation (ellipsis lands on the LEFT
+                so the filename tail stays visible); the inner bdo forces
+                LTR so each character keeps its real order. */}
+            <span className="diff-filename-path">
+              <bdo dir="ltr">{selectedFile}</bdo>
+            </span>
             <i className="ti ti-copy diff-filename-copy" />
           </button>
           <div className="diff-header-right">
@@ -337,6 +412,14 @@ export function DiffView() {
               <span className="added">+{added}</span>
               <span className="removed">-{removed}</span>
             </div>
+            <button
+              className={`ct-btn ghost ${diffSideBySide ? 'active' : ''}`}
+              onClick={() => setDiffSideBySide(!diffSideBySide)}
+              title={t('diff.side_by_side_tooltip')}
+            >
+              <i className="ti ti-columns" />
+              <span>{t('diff.side_by_side')}</span>
+            </button>
             <button
               className={`ct-btn ghost ${diffWordLevel ? 'active' : ''}`}
               onClick={() => setDiffWordLevel(!diffWordLevel)}
@@ -354,14 +437,24 @@ export function DiffView() {
               <span>{t('diff.ignore_whitespace')}</span>
             </button>
             {selectedFile && (
-              <button
-                className="ct-btn ghost"
-                onClick={() => setBlameOpen(true)}
-                title={t('diff.blame_tooltip')}
-              >
-                <i className="ti ti-user-search" />
-                <span>{t('diff.blame')}</span>
-              </button>
+              <>
+                <button
+                  className="ct-btn ghost"
+                  onClick={() => setHistoryOpen(true)}
+                  title={t('diff.file_history_tooltip')}
+                >
+                  <i className="ti ti-history" />
+                  <span>{t('diff.file_history')}</span>
+                </button>
+                <button
+                  className="ct-btn ghost"
+                  onClick={() => setBlameOpen(true)}
+                  title={t('diff.blame_tooltip')}
+                >
+                  <i className="ti ti-user-search" />
+                  <span>{t('diff.blame')}</span>
+                </button>
+              </>
             )}
             {fileIndices.length > 1 && (
               <div className="diff-hunk-nav" title="文件级跳转">
@@ -482,7 +575,13 @@ export function DiffView() {
             <p>{t('diff.pick_file_hint')}</p>
           </div>
         )}
-        {items.length > 0 && (
+        {/* Side-by-side mode skips the virtualized unified list and renders
+            its own two-column layout. Kept gated for diff.length > 0 so
+            empty-state branches above still take precedence. */}
+        {diffSideBySide && diff.length > 0 && (
+          <SideBySideDiff diff={diff} showFileHeaders={diff.length > 1} />
+        )}
+        {!diffSideBySide && items.length > 0 && (
           <div style={{ height: total, position: 'relative' }}>
             {items.slice(startIdx, endIdx + 1).map((item, i) => {
               const idx = startIdx + i
@@ -523,6 +622,42 @@ export function DiffView() {
           commit={selectedCommit?.id}
           onClose={() => setBlameOpen(false)}
         />
+      )}
+      {historyOpen && selectedFile && (
+        <FileHistoryModal
+          file={selectedFile}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
+      {blockHistory && selectedFile && (
+        <BlockHistoryModal
+          file={selectedFile}
+          start={blockHistory.start}
+          end={blockHistory.end}
+          onClose={() => setBlockHistory(null)}
+        />
+      )}
+      {selectionPill && selectedFile && (
+        <button
+          className="block-history-pill"
+          style={{ left: selectionPill.x, top: selectionPill.y }}
+          onMouseDown={(e) => {
+            // Use mouseDown not onClick — onClick fires after selectionchange
+            // which clears the pill state if the click collapses the selection.
+            e.preventDefault()
+            setBlockHistory({ start: selectionPill.start, end: selectionPill.end })
+            setSelectionPill(null)
+            window.getSelection()?.removeAllRanges()
+          }}
+          title={t('block_history.pill_tooltip')}
+        >
+          <i className="ti ti-history" />
+          {t('block_history.pill', {
+            range: selectionPill.start === selectionPill.end
+              ? `L${selectionPill.start}`
+              : `L${selectionPill.start}–L${selectionPill.end}`,
+          })}
+        </button>
       )}
     </div>
   )
@@ -573,8 +708,16 @@ function DiffLineRow({
   lang: string | null
 }) {
   const cls = line.origin === '+' ? 'add' : line.origin === '-' ? 'del' : ''
+  // The "new side" line number is what's interesting for block-history
+  // queries — it's the row this content has in HEAD. Deletion-only rows
+  // fall back to their pre-image line. Attached as a data-attr so the
+  // selection-watcher can read it without re-parsing the rendered text.
+  const lineForHistory = line.new_lineno ?? line.old_lineno ?? null
   return (
-    <div className={`diff-line ${cls}`}>
+    <div
+      className={`diff-line ${cls}`}
+      data-line-no={lineForHistory ?? undefined}
+    >
       <span className="ln old">{line.old_lineno ?? ' '}</span>
       <span className="ln new">{line.new_lineno ?? ' '}</span>
       <span className="origin">{line.origin === ' ' ? '' : line.origin}</span>
