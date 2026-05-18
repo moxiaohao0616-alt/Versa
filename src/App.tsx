@@ -9,8 +9,8 @@ import { DiffView } from './components/Diff'
 import { Terminal } from './components/Terminal'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { Settings } from './components/Settings'
-import { GraphView } from './components/Graph'
 import { BranchesView } from './components/Branches'
+import { GraphView } from './components/Graph'
 import { ConflictView } from './components/Conflict'
 import { TabStrip } from './components/TabStrip'
 import { BisectBanner } from './components/Bisect'
@@ -101,6 +101,64 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Native menu (macOS menu bar / Win-Linux menu) dispatches a single
+  // `versa:menu` event per click; here we map the id back to an in-app
+  // action. URL-opening items are handled in Rust, so they never land here.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    listen<string>('versa:menu', evt => {
+      const id = evt.payload
+      const s = useStore.getState()
+      switch (id) {
+        case 'open_repo':
+          handleOpenRepo()
+          break
+        case 'close_tab':
+          if (s.repoPath) s.closeTab(s.repoPath)
+          break
+        case 'open_settings':
+          setSettingsOpen(true)
+          break
+        case 'open_cheatsheet':
+          setCheatsheetOpen(true)
+          break
+        case 'open_about':
+          setAboutOpen(true)
+          break
+        case 'view_changes':
+          s.setTab('changes')
+          break
+        case 'view_history':
+          s.setTab('history')
+          break
+        case 'view_branches':
+          s.setTab('branches')
+          break
+        case 'toggle_terminal':
+          s.setTerminalOpen(!s.terminalOpen)
+          break
+        case 'toggle_right_sidebar':
+          s.toggleRightSidebar()
+          break
+        case 'next_tab':
+        case 'prev_tab': {
+          if (s.tabs.length < 2 || !s.repoPath) return
+          const idx = s.tabs.findIndex(tab => tab.path === s.repoPath)
+          const dir = id === 'next_tab' ? 1 : -1
+          const next = s.tabs[(idx + dir + s.tabs.length) % s.tabs.length]
+          s.switchTab(next.path)
+          break
+        }
+        case 'check_updates':
+          // Updater check is wired into the Settings page already; just
+          // open Settings so the user can hit the button.
+          setSettingsOpen(true)
+          break
+      }
+    }).then(fn => { unlisten = fn })
+    return () => { unlisten?.() }
   }, [])
 
   // Streaming progress from git push/pull/clone (one frame per stderr line)
@@ -269,11 +327,13 @@ export default function App() {
               && repoStatus?.state !== 'reverting'
               && repoStatus?.state !== 'cherry-picking'
               && activeTab !== 'branches'
+              && activeTab !== 'history'
             const rsVisible = rightSidebarOpen && inNormalView
             return (
           <div className={`app-body ${rsVisible ? 'has-right' : ''}`}>
             <nav className="icon-bar">
               <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => setSettingsOpen(false)} />
+              <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => setSettingsOpen(false)} />
               <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => setSettingsOpen(false)} />
               <div className="spacer" />
               {inNormalView && (
@@ -308,40 +368,32 @@ export default function App() {
               <main className="main-area settings-full">
                 <Settings />
               </main>
-            ) : (repoStatus?.state === 'merging'
-                  || repoStatus?.state === 'rebasing'
-                  || repoStatus?.state === 'reverting'
-                  || repoStatus?.state === 'cherry-picking') ? (
-              <ConflictView />
-            ) : (
-              <>
-                {activeTab !== 'branches' && <Sidebar />}
-                <main className={`main-area${activeTab === 'branches' ? ' settings-full' : ''}`}>
-                  {activeTab === 'branches' ? (
-                    <BranchesView />
-                  ) : (
-                    <>
-                      <div className="content-tabs">
-                        <button
-                          className={`content-tab ${activeTab === 'changes' ? 'active' : ''}`}
-                          onClick={() => useStore.getState().setTab('changes')}
-                        >
-                          {t('tabs.changes')}
-                        </button>
-                        <button
-                          className={`content-tab ${activeTab === 'history' ? 'active' : ''}`}
-                          onClick={() => useStore.getState().setTab('history')}
-                        >
-                          {t('tabs.history')}
-                        </button>
-                      </div>
-                      {activeTab === 'history' ? <GraphView /> : <DiffView />}
-                    </>
-                  )}
-                </main>
-                {rsVisible && <RightSidebar />}
-              </>
-            )}
+            ) : (() => {
+              // Conflict resolution takes over ONLY the 'changes' tab. The
+              // user can still navigate to history / branches mid-merge to
+              // peek at context without aborting — otherwise the icon-bar
+              // buttons silently no-op, which is what we shipped before
+              // and confused testers.
+              const inConflict =
+                repoStatus?.state === 'merging'
+                || repoStatus?.state === 'rebasing'
+                || repoStatus?.state === 'reverting'
+                || repoStatus?.state === 'cherry-picking'
+              if (activeTab === 'changes' && inConflict) {
+                return <ConflictView />
+              }
+              return (
+                <>
+                  {activeTab === 'changes' && <Sidebar />}
+                  <main className={`main-area${activeTab !== 'changes' ? ' settings-full' : ''}`}>
+                    {activeTab === 'branches' ? <BranchesView />
+                      : activeTab === 'history' ? <GraphView />
+                      : <DiffView />}
+                  </main>
+                  {rsVisible && <RightSidebar />}
+                </>
+              )
+            })()}
           </div>
             )
           })()}

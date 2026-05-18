@@ -6,8 +6,19 @@ import { RebaseModal } from '../Rebase'
 import { relTime } from '../../lib/relTime'
 
 const ROW_H = 36
-const LANE_W = 22
+const LANE_W_MAX = 22
+const LANE_W_MIN = 8
+// We try to keep the whole graph column under ~240px wide on screen so it
+// doesn't dominate the layout. With many concurrent branches we tighten
+// the per-lane spacing; very wide repos still get a horizontal scrollbar
+// on the graph column alone (the commit message column stays in view).
+const LANE_W_TARGET = 240
 const NODE_R = 5
+
+function laneWidth(maxX: number): number {
+  const w = Math.floor(LANE_W_TARGET / Math.max(maxX + 1, 1))
+  return Math.max(LANE_W_MIN, Math.min(LANE_W_MAX, w))
+}
 
 const LANE_COLORS = [
   '#639922', '#2563eb', '#d97706', '#7c3aed',
@@ -94,10 +105,10 @@ function computeGraph(commits: RawCommit[]) {
   return { placed, edges, maxX }
 }
 
-function makePath(e: GraphEdge): string {
-  const x1 = e.x1 * LANE_W + LANE_W / 2
+function makePath(e: GraphEdge, laneW: number): string {
+  const x1 = e.x1 * laneW + laneW / 2
   const y1 = e.row1 * ROW_H + ROW_H / 2
-  const x2 = e.x2 * LANE_W + LANE_W / 2
+  const x2 = e.x2 * laneW + laneW / 2
   const y2 = e.row2 * ROW_H + ROW_H / 2
   const sy = y1 + NODE_R
   const ey = y2 - NODE_R
@@ -129,7 +140,7 @@ const TIME_FILTER_SECONDS: Record<TimeFilter, number | null> = {
 export function GraphView() {
   const { t } = useTranslation()
   const {
-    repoPath, activeTab, checkoutCommit, selectCommit, repoStatus,
+    repoPath, checkoutCommit, selectCommit, repoStatus,
     revertCommit, cherryPickCommit, resetToCommit, createTag,
     graphCommits, graphLimit, graphLoading, graphSelected,
     loadGraph, loadMoreGraph, loadAllGraph, setGraphSelected, locateCommit,
@@ -263,12 +274,12 @@ export function GraphView() {
       .catch(() => setCherryMsg(cherryTarget.message))
   }, [cherryTarget?.id, repoPath])
 
-  // Re-fetch via store action when this view becomes visible OR the active
-  // repo / its state changes. Store-side limit survives tab switches.
+  // Re-fetch on repo change or working-tree state change. The graph is always
+  // visible (lives in the sidebar) so there's no longer a tab gate.
   useEffect(() => {
-    if (!repoPath || activeTab !== 'history') return
+    if (!repoPath) return
     loadGraph()
-  }, [repoPath, activeTab, repoStatus])
+  }, [repoPath, repoStatus])
 
   // hasMore = backend filled the requested window exactly → may be more.
   const hasMore = commits.length === limit
@@ -297,8 +308,9 @@ export function GraphView() {
   }
 
   const { placed, edges, maxX } = useMemo(() => computeGraph(commits), [commits])
+  const laneW = laneWidth(maxX)
 
-  const svgW = (maxX + 1) * LANE_W + 12
+  const svgW = (maxX + 1) * laneW + 12
   const totalH = placed.length * ROW_H
 
   // Rendered list: filter results override the placed graph view.
@@ -482,29 +494,31 @@ export function GraphView() {
           <div className="graph-inner">
             {/* Lane SVG only makes sense in unfiltered view (parents may be missing in filtered) */}
             {!hasFilter && (
-              <svg className="graph-svg" width={svgW} height={totalH} style={{ flexShrink: 0 }}>
-                {edges.map((e, i) => (
-                  <path
-                    key={i}
-                    d={makePath(e)}
-                    stroke={e.color}
-                    strokeWidth={1.5}
-                    fill="none"
-                    opacity={0.85}
-                  />
-                ))}
-                {placed.map((p, i) => (
-                  <circle
-                    key={p.id}
-                    cx={p.x * LANE_W + LANE_W / 2}
-                    cy={i * ROW_H + ROW_H / 2}
-                    r={NODE_R}
-                    fill={p.color}
-                    stroke="var(--bg)"
-                    strokeWidth={2}
-                  />
-                ))}
-              </svg>
+              <div className="graph-svg-col" style={{ height: totalH }}>
+                <svg className="graph-svg" width={svgW} height={totalH}>
+                  {edges.map((e, i) => (
+                    <path
+                      key={i}
+                      d={makePath(e, laneW)}
+                      stroke={e.color}
+                      strokeWidth={1.5}
+                      fill="none"
+                      opacity={0.85}
+                    />
+                  ))}
+                  {placed.map((p, i) => (
+                    <circle
+                      key={p.id}
+                      cx={p.x * laneW + laneW / 2}
+                      cy={i * ROW_H + ROW_H / 2}
+                      r={NODE_R}
+                      fill={p.color}
+                      stroke="var(--bg)"
+                      strokeWidth={2}
+                    />
+                  ))}
+                </svg>
+              </div>
             )}
 
             <div className={`graph-rows ${hasFilter ? 'flat' : ''}`}>

@@ -11,44 +11,100 @@
 </div>
 
 Versa is a desktop Git client built for full-stack engineers who want a fast,
-opinionated UI without leaving the speed and depth of the command line.
+opinionated UI without giving up the speed and depth of the command line.
 Every git verb is translated into something a human says — "save progress",
 "this commit is good / bad", "go back to this step" — without ever hiding the
-real thing underneath.
+real thing underneath. When a workflow is hairy (merge conflicts, interactive
+rebase, bisect, reflog rewind), the UI walks you through it; when you'd
+rather drop to a shell, ⌘\` opens an xterm in the repo.
 
-> **Status: developer preview.** It builds on macOS, Linux and Windows, but
-> bug surface is still wide. Feedback and PRs welcome.
+> **Status: developer preview.** Builds on macOS, Linux and Windows. The
+> happy paths are stable; bug surface around edge cases is still real.
+> Feedback and PRs very welcome.
 
 ---
 
-## Why
+## Why Versa
 
-Most Git GUIs land in one of two buckets:
+Most Git GUIs either bind you to one editor (heavy IDE plugins) or paper
+over what git is actually doing (SourceTree / GitKraken Free / Tower).
+Versa picks a different lane — and earns each line below by being
+something the others aren't:
 
-- _Heavy IDE plugins_ that bind you to one editor and feel sluggish.
-- _Visual git wrappers_ (SourceTree, GitKraken Free, Tower) that tell you
-  the verbs but not the consequences.
-
-Versa is the third option: **a standalone app that respects you know what
-git is doing**, but renders the moves so you stop staring at man pages.
+- **AI commit messages, AI conflict resolution — your key, no Versa
+  server.** Generate commit messages from the staged diff, get a "use
+  ours / theirs / both" recommendation with a one-sentence rationale on
+  a real 3-way merge conflict, ask "what does this commit do?" in plain
+  English. Anthropic, OpenAI, DeepSeek, Kimi, or any OpenAI-compatible
+  endpoint — your key never leaves your machine, your code is never
+  uploaded to Versa (there is no Versa).
+- **A 3-way conflict editor that doesn't punt to your IDE.** Inline
+  ours / base / theirs columns with per-hunk "use mine / theirs / both /
+  neither", a live merged-result preview that **scrolls in sync** with
+  whichever hunk you're inspecting, and once everything is resolved a
+  review screen with the full staged diff — see exactly what's about to
+  ship before clicking 完成合并.
+- **Embedded xterm.js terminal.** ⌘\` toggles a real shell at the repo
+  root. The UI walks you through hairy workflows; when you'd rather drop
+  to git CLI, you're one keystroke away.
+- **Rust + libgit2 for the data plane.** Native libgit2 instead of
+  shelling out for every status call, virtualized diff rendering keeps
+  10K+ line diffs scrollable, and the commit-history graph auto-compresses
+  lane spacing so a repo with 30 concurrent branches still reads cleanly.
+- **Reflog "Time Machine".** Every HEAD-moving operation (commit, checkout,
+  reset, rebase, pull, cherry-pick…) is a clickable row with a friendly
+  2-char verb chip. Pick any past HEAD, hit 回到这步, done. The reset
+  itself is logged, so you can undo with the same tool — it's the safety
+  net most GUIs don't even surface.
+- **Bisect + Interactive rebase as guided workflows.** Drag-and-drop rebase
+  with drop / squash / reword; bisect with an AI-suggested starting commit
+  read from recent commit messages and one-click good / bad / skip.
+- **Multi-tab repo management.** Each repo runs in its own tab with
+  isolated state — no losing context bouncing between projects.
+- **Free, open source, no tiers.** Apache 2.0; no "GitKraken Pro for
+  private repos", no Tower subscription, no contributor agreement.
+- **Bilingual (中文 / English) out of the box.** First-class internal
+  i18n that follows your OS language, not a community translation plugin.
 
 ## Key features
 
 <details open><summary><b>Everyday git, but readable</b></summary>
 
-- Working-tree → stage → commit → push with progress
+- Working-tree → stage → commit → push with live progress bars
 - **Hunk-level staging** — pick the change, not the file
 - Multi-tab repo management with per-tab state snapshots
-- Visual graph view with lane rendering, search and load-more
-- Embedded xterm.js terminal for the moments you do want CLI
+- Click any file path in the diff header to copy its absolute path (paste into
+  IDE, Finder, terminal — no more selecting Next.js route segments by hand)
+- Embedded xterm.js terminal (⌘\`) for the moments you do want CLI
+
+</details>
+
+<details open><summary><b>Commit history, as a first-class view</b></summary>
+
+- Full-page graph view, not a sub-tab on the side
+- **Adaptive lane width** — the graph compresses itself when a repo has
+  many concurrent branches so the message column always stays readable
+- Per-commit kebab: checkout, revert, cherry-pick, tag, reset, hard reset
+- Search by message / author / time-range, load-more with on-demand "load all"
+- Click a commit → see its files in the sidebar, click a file → see its diff
 
 </details>
 
 <details open><summary><b>3-way merge that doesn't make you cry</b></summary>
 
-- Inline side-by-side conflict view with "use ours / theirs / both"
-- Per-hunk choice — not just per-file
-- Detects nested git repos and explains them instead of failing silently
+- Inline ours / base / theirs columns with **per-hunk** "use mine / theirs /
+  both / neither"
+- Live **merged-result preview** with a draggable splitter — defaults to half
+  the window, syncs scroll position to whichever hunk you're inspecting,
+  highlights the current hunk's region in green
+- When every conflict is resolved, swap to a **review screen** that shows the
+  full staged diff (file-by-file, expandable) — see exactly what's about to
+  ship before clicking "完成合并"
+- AI can read the conflict and recommend ours / theirs / both with a
+  one-sentence rationale
+- Works for merge, rebase, revert and cherry-pick — same UI, mode-aware labels
+- Detects nested git repos in the working tree and explains them instead of
+  failing the commit silently
 
 </details>
 
@@ -80,8 +136,11 @@ git is doing**, but renders the moves so you stop staring at man pages.
 <details open><summary><b>Stash, reflog, blame</b></summary>
 
 - First-class Stash UI with apply / pop / drop and two-step confirm
-- **Reflog "Time Machine"** — browse and `git reset --hard` to any past HEAD
-  position; the reset itself is logged, so you can undo with the same tool
+- **Reflog "Time Machine"** — every HEAD-moving operation (commit, checkout,
+  reset, rebase, pull, cherry-pick…) gets a friendly 2-char Chinese verb chip
+  with the raw reflog token on hover. Pick any past HEAD position and
+  `git reset --hard` back; the reset itself is logged, so you can undo with
+  the same tool
 - Per-line Blame view with author, timestamp and commit summary
 
 </details>
@@ -122,7 +181,10 @@ git is doing**, but renders the moves so you stop staring at man pages.
 - Settings import / export as JSON for moving between machines
 - Optional GPG / SSH commit signing
 - Right-side aux panel: project runner, AI explain, stash quick-view
-- About modal with one-click diagnostic copy for bug reports
+- About modal + error toasts both have a one-click **"copy diagnostic info"**
+  button so bug reports come with `versa / tauri / libgit2 / OS` versions
+  pre-filled
+- Auto-updater (when notarized builds are available)
 
 </details>
 
@@ -160,6 +222,21 @@ npm install
 npm run tauri dev     # hot-reload dev shell
 npm run tauri build   # production bundle in src-tauri/target/release/bundle/
 ```
+
+## Keyboard cheatsheet
+
+Press `?` anytime for the full sheet. Highlights (`⌘` is `Ctrl` on Windows / Linux):
+
+| Key | What it does |
+| --- | --- |
+| `?` | Open this cheatsheet |
+| `Esc` | Close the current modal · cancel the active AI stream |
+| `⌘\`` | Toggle the embedded terminal |
+| `⌘W` | Close the current repo tab |
+| `⌘⇧] / ⌘⇧[` | Next / previous repo tab |
+| `⌘F` | Search inside the current diff |
+| `⌘↑ / ⌘↓` | Previous / next **file** in the diff |
+| `⌥↑ / ⌥↓` | Previous / next **hunk** in the diff |
 
 ## Configuring AI
 
@@ -205,16 +282,31 @@ If you don't configure AI, the rest of Versa works fine.
 
 ## Roadmap status
 
-The `v0.x` work is largely done — see [Releases](https://github.com/moxiaohao0616-alt/Versa/releases) for shipped versions. What's still cooking before a public 1.0:
+The `v0.x` work is largely done — see [Releases](https://github.com/moxiaohao0616-alt/Versa/releases)
+for shipped versions. What's done vs. what's still cooking before a public 1.0:
+
+**Shipped**
 
 - ✅ Hunk staging · Tag mgmt · Reflog · Blame · Reset · Fetch · Remotes · Submodules · LFS
-- ✅ AI streaming with Esc-cancel, multi-provider
-- ✅ macOS / Linux / Windows CI matrix
-- ✅ Bilingual UI (en / zh), error boundary, auto-updater
+- ✅ Interactive rebase (drag-and-drop, drop / squash / reword)
+- ✅ Bisect (with AI start-commit suggestion)
+- ✅ AI streaming with Esc-cancel, multi-provider (Anthropic / OpenAI / DeepSeek / Kimi / compatible)
+- ✅ 3-way conflict editor with live preview, sync-scroll, AI hint, post-resolve review screen
+- ✅ Adaptive commit graph (auto lane compression)
+- ✅ macOS / Linux / Windows CI matrix · auto-updater
+- ✅ Bilingual UI (en / zh), error boundary, diagnostic copy
+
+**In progress**
+
 - 🚧 macOS code signing + notarization (needs Apple Developer ID)
 - 🚧 Windows code signing (needs SmartScreen cert)
+- 🚧 Windows MSI installer requires numeric-only pre-release versions; for now
+  alpha builds ship only the NSIS `.exe` installer on Windows
 - 🚧 GraphView virtualization for 50k+ commit repos
 - 🚧 Full i18n sweep across all components (resource files ready)
+
+**Looking further**
+
 - 🔭 Side-by-side diff layout, in-app issue tracker integration, cloud sync
 
 ## Tests

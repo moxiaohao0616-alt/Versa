@@ -22,19 +22,25 @@ export function ReflogModal({ onClose }: { onClose: () => void }) {
     })()
   }, [])
 
+  // Reduce git's verbose reflog tokens to a single short label for the chip.
+  // The original token still travels as `title` on the chip so users can hover
+  // to see things like "rebase (abort)" or "pull --rebase (start)".
   const actionLabel = (action: string) => {
-    // Translate the most common reflog action tokens to friendlier labels.
-    switch (action) {
-      case 'commit': case 'commit (initial)': case 'commit (amend)':         return t('reflog.action_commit')
-      case 'checkout':                                                       return t('reflog.action_checkout')
-      case 'reset':                                                          return t('reflog.action_reset')
-      case 'merge':                                                          return t('reflog.action_merge')
-      case 'rebase': case 'rebase -i (finish)': case 'rebase (start)':       return t('reflog.action_rebase')
-      case 'pull':                                                           return t('reflog.action_pull')
-      case 'clone':                                                          return t('reflog.action_clone')
-      case 'revert':                                                         return t('reflog.action_revert')
-      case 'cherry-pick':                                                    return t('reflog.action_cherry_pick')
-      default:                                                               return action || t('reflog.action_other')
+    // Split on space, paren, or dash to grab the leading verb. `cherry-pick`
+    // becomes `cherry`; `pull --rebase` becomes `pull`; `rebase (abort)` → `rebase`.
+    const head = action.split(/[\s(-]/, 1)[0]
+    switch (head) {
+      case 'commit':     return t('reflog.action_commit')
+      case 'checkout':   return t('reflog.action_checkout')
+      case 'reset':      return t('reflog.action_reset')
+      case 'merge':      return t('reflog.action_merge')
+      case 'rebase':     return t('reflog.action_rebase')
+      case 'pull':       return t('reflog.action_pull')
+      case 'clone':      return t('reflog.action_clone')
+      case 'revert':     return t('reflog.action_revert')
+      case 'cherry':     return t('reflog.action_cherry_pick')
+      case 'branch':     return t('reflog.action_branch')
+      default:           return head || t('reflog.action_other')
     }
   }
 
@@ -57,7 +63,7 @@ export function ReflogModal({ onClose }: { onClose: () => void }) {
           ) : entries.map(e => (
             <div key={e.index} className="reflog-row" onClick={() => setConfirmTarget(e)}>
               <span className="reflog-idx">HEAD@{`{${e.index}}`}</span>
-              <span className="reflog-action">{actionLabel(e.action)}</span>
+              <span className="reflog-action" title={e.action}>{actionLabel(e.action)}</span>
               <span className="reflog-msg" title={e.message}>{e.message}</span>
               <span className="reflog-meta">
                 <span className="branch-sha">{e.short}</span>

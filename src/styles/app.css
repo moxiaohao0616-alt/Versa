@@ -1722,15 +1722,28 @@ body {
 .graph-inner {
   display: flex;
   align-items: flex-start;
-  min-width: max-content;
+  /* No min-width: max-content — that's what was pushing the messages
+     off-screen when the graph had many lanes. Each child column owns its
+     own width / overflow. */
 }
+/* Lane SVG is wrapped in this column so it can scroll horizontally on its
+   own when there are many concurrent branches. Outer .graph-scroll keeps
+   handling vertical scroll for the whole row stream. */
+.graph-svg-col {
+  flex: 0 0 auto;
+  max-width: 260px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* Thin scrollbar so it doesn't visually compete with the row */
+.graph-svg-col::-webkit-scrollbar { height: 6px; }
+.graph-svg-col::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 .graph-svg {
   display: block;
-  flex-shrink: 0;
 }
 .graph-rows {
-  flex: 1;
-  min-width: 480px;
+  flex: 1 1 auto;
+  min-width: 0;
   border-left: 0.5px solid var(--border);
 }
 .graph-row {
@@ -2086,45 +2099,61 @@ kbd {
 .reflog-list {
   max-height: 60vh;
   overflow-y: auto;
-  padding: 8px 12px;
+  padding: 8px 12px 12px;
 }
 .reflog-row {
   display: grid;
-  grid-template-columns: 100px 64px 1fr auto;
+  /* Fixed columns: HEAD@{N} | action chip | message | meta.
+     The chip column is wide enough for the longest Chinese verb (2 chars
+     ≈ 36px) plus padding — multi-token actions like "rebase (abort)" are
+     now normalized to a single verb in JSX, so they fit too. */
+  grid-template-columns: 78px 56px 1fr auto;
   align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 7px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12.5px;
+  min-width: 0;
 }
 .reflog-row:hover { background: var(--bg2); }
 .reflog-idx {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text3);
+  white-space: nowrap;
 }
 .reflog-action {
   font-size: 11px;
-  padding: 1px 8px;
+  padding: 2px 0;
   border-radius: 999px;
   background: var(--blue-bg);
   color: var(--blue-text);
   text-align: center;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
 }
 .reflog-msg {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  color: var(--text);
 }
 .reflog-meta {
   display: inline-flex;
   gap: 10px;
   font-size: 11px;
+  white-space: nowrap;
 }
-.reflog-meta .branch-sha,
-.reflog-meta .branch-time { opacity: 0.6; }
+.reflog-meta .branch-sha {
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0.7;
+}
+.reflog-meta .branch-time { opacity: 0.55; }
 .modal-title {
   padding: 16px 18px 12px;
   font-size: 14px;
@@ -3252,6 +3281,172 @@ kbd {
   margin-top: 2px;
 }
 
+/* Review screen: full staged diff for the merge that's about to be made,
+   commit message input, and the finish/abort buttons. Replaces the 3-pane
+   view once every conflicted file has been resolved. */
+.conflict-review {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.conflict-review-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 8px;
+}
+.conflict-review-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.conflict-review-head > .ti {
+  font-size: 24px;
+  color: var(--green);
+  margin-top: 2px;
+}
+.conflict-review-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.conflict-review-sub   { font-size: 12.5px; color: var(--text2); margin-top: 2px; }
+.conflict-review-loading {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.conflict-review-loading .ti { animation: spin 1s linear infinite; }
+.conflict-review-card {
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.conflict-review-card-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+}
+.conflict-review-card-head:hover { background: var(--bg2); }
+.conflict-review-card-head > .ti:first-child { color: var(--text3); font-size: 14px; }
+.conflict-review-card-head > .ti-file-code { color: var(--text3); font-size: 14px; }
+.conflict-review-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.conflict-review-card-stats {
+  display: inline-flex;
+  gap: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.conflict-review-card-stats .added   { color: var(--green-text); }
+.conflict-review-card-stats .removed { color: var(--red-text);   }
+.conflict-review-card.expanded { background: var(--bg); }
+.conflict-review-card-body {
+  border-top: 0.5px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.conflict-review-hunk-head {
+  padding: 4px 12px;
+  background: var(--bg2);
+  color: var(--text3);
+  font-size: 11.5px;
+  border-bottom: 0.5px solid var(--border);
+  border-top: 0.5px solid var(--border);
+}
+.conflict-review-line {
+  display: flex;
+  align-items: baseline;
+  padding: 0 8px;
+  white-space: pre;
+}
+.conflict-review-line .ln {
+  display: inline-block;
+  min-width: 36px;
+  text-align: right;
+  opacity: 0.35;
+  margin-right: 6px;
+  user-select: none;
+  font-size: 11px;
+}
+.conflict-review-line .code { flex: 1; min-width: 0; }
+.conflict-review-line.origin-add { background: color-mix(in srgb, var(--green) 12%, transparent); }
+.conflict-review-line.origin-add .code { color: var(--green-text); }
+.conflict-review-line.origin-del { background: color-mix(in srgb, var(--red-text) 10%, transparent); }
+.conflict-review-line.origin-del .code { color: var(--red-text); }
+/* Once every file is resolved, the 3-pane view is replaced with this
+   centered "you're done" card so the screen isn't a blank canvas. */
+.conflict-done {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg2);
+}
+.conflict-done-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 36px 48px;
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.06);
+  max-width: 480px;
+  text-align: center;
+}
+.conflict-done-icon {
+  font-size: 56px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.conflict-done-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.conflict-done-sub {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.6;
+  max-width: 360px;
+}
+.conflict-done-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
 /* ── Conflict view ───────────────────────────────────────────────────────── */
 .conflict-view {
   flex: 1;
@@ -3259,6 +3454,14 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+/* When rendered directly inside the grid `.app-body` (during merge/rebase,
+   when there's no Sidebar to occupy column 2), span all remaining columns
+   so the view doesn't get crushed into the 300px sidebar slot. */
+.app-body > .conflict-view {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
 }
 .conflict-banner {
   display: flex;
@@ -3454,7 +3657,10 @@ kbd {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  /* minmax(0, 1fr) — without the explicit 0 min, a column with long
+     unbreakable lines (e.g. a JS one-liner with chained .sort().filter())
+     forces its track wider than 1fr, squashing the other two. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
 }
@@ -3462,6 +3668,7 @@ kbd {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   border-right: 0.5px solid var(--border);
 }
 .conflict-column:last-child { border-right: none; }
@@ -3518,11 +3725,37 @@ kbd {
 
 /* Merged preview pane */
 .conflict-preview {
-  border-top: 0.5px solid var(--border);
-  max-height: 200px;
+  /* Height set inline from state; the drag handle on top lets the user
+     resize. flex-shrink:0 so it doesn't get squashed by the 3-pane
+     columns when both are inside the same flex column. */
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  border-top: 0.5px solid var(--border);
+  background: var(--bg);
 }
+.conflict-preview-handle {
+  flex: 0 0 auto;
+  height: 6px;
+  cursor: row-resize;
+  border-bottom: 0.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+}
+.conflict-preview-handle:hover { background: var(--bg2); }
+.conflict-preview-handle:active { background: color-mix(in srgb, var(--green) 14%, var(--bg2)); }
+.conflict-preview-handle-grip {
+  width: 32px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text3);
+  opacity: 0.4;
+  pointer-events: none;
+}
+.conflict-preview-handle:hover .conflict-preview-handle-grip { opacity: 0.75; }
 .conflict-preview-title {
   padding: 6px 12px;
   font-size: 12px;
@@ -3532,15 +3765,42 @@ kbd {
   gap: 6px;
   border-bottom: 0.5px solid var(--border);
   background: var(--bg);
+  flex: 0 0 auto;
 }
 .conflict-preview-warn { color: #EF9F27; font-weight: 400; font-size: 11px; }
 .conflict-preview-body {
   flex: 1;
   overflow: auto;
   margin: 0;
-  padding: 8px 12px;
+  padding: 6px 0;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.6;
   white-space: pre;
 }
+.conflict-preview-line {
+  display: flex;
+  align-items: baseline;
+  padding: 0 8px;
+  white-space: pre;
+}
+.conflict-preview-line .ln {
+  display: inline-block;
+  min-width: 36px;
+  text-align: right;
+  opacity: 0.35;
+  margin-right: 10px;
+  user-select: none;
+}
+.conflict-preview-line .code { flex: 1; min-width: 0; }
+.conflict-preview-line.is-hunk { cursor: pointer; }
+/* Hunks the user has decided / kept get a soft accent so they're easy to
+   pick out from common context. Current hunk is highlighted strongly. */
+.conflict-preview-line.is-hunk {
+  background: color-mix(in srgb, var(--green) 5%, transparent);
+}
+.conflict-preview-line.is-hunk.current {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  outline: 0.5px solid color-mix(in srgb, var(--green) 35%, transparent);
+}
+.conflict-preview-line.is-hunk:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }

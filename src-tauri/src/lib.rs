@@ -4,6 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod commands;
+mod menu;
 mod watcher;
 
 use commands::*;
@@ -34,6 +35,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(WatcherRegistry::default())
+        .setup(|app| {
+            let m = menu::build(app.handle())?;
+            app.set_menu(m)?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            menu::handle_event(app, event.id().as_ref());
+        })
         .invoke_handler(tauri::generate_handler![
             open_repo, save_progress, get_diff, get_history,
             create_branch, switch_branch, stage_file, unstage_file, discard_file,
