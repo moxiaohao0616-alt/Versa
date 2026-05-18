@@ -139,6 +139,8 @@ jobs:
       - name: build & bundle
         uses: tauri-apps/tauri-action@v0
         env:
+          # Required so tauri-action can create the GitHub Release on tag pushes.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater key — required for `createUpdaterArtifacts: true` to
           # actually emit signed `.tar.gz.sig` files.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
