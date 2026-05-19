@@ -926,6 +926,65 @@ body {
 .term-btn:hover { opacity: 1; }
 .term-xterm { flex: 1; overflow: hidden; padding: 0 6px 2px; min-height: 0; }
 
+/* ── Terminal tab strip ─────────────────────────────────────────────────── */
+
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;            /* let it shrink so .term-path still fits */
+  overflow-x: auto;
+  scrollbar-width: none;   /* horizontal scrollbar hidden — tabs scroll via wheel */
+}
+.term-tabs::-webkit-scrollbar { display: none; }
+
+.term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--term-fg2);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.6;
+  transition: opacity 0.1s, background 0.1s;
+}
+.term-tab:hover { opacity: 1; background: rgba(255, 255, 255, 0.06); }
+.term-tab.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--term-fg);
+}
+.term-tab-label { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.term-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  border-radius: 3px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+}
+.term-tab:hover .term-tab-close { opacity: 0.6; }
+.term-tab.active .term-tab-close { opacity: 0.8; }
+.term-tab-close:hover { opacity: 1 !important; background: rgba(255, 255, 255, 0.15); }
+
+.term-tab-new {
+  padding: 3px 6px;
+  opacity: 0.5;
+}
+.term-tab-new:hover { opacity: 1; }
+
+.term-bodies {
+  background: var(--term-bg);
+}
+
 /* ── Welcome ────────────────────────────────────────────────────────────── */
 
 .welcome {

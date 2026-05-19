@@ -47,6 +47,17 @@ pub fn pty_open<R: Runtime>(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
+    // Idempotent: if the frontend ever calls open twice with the same id
+    // (e.g. React strict-mode double mount, or accidental retry), don't
+    // spawn a second shell. Returning Ok lets the caller proceed to attach
+    // listeners to the already-running PTY.
+    {
+        let map = state.0.lock().unwrap();
+        if map.contains_key(&session_id) {
+            return Ok(());
+        }
+    }
+
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {

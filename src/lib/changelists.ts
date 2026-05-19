@@ -249,3 +249,20 @@ export function getActiveGroupName(defaultLabel: string): string {
   if (cls.activeId === DEFAULT_GROUP_ID) return defaultLabel
   return cls.groups.find((g) => g.id === cls.activeId)?.name ?? defaultLabel
 }
+
+/**
+ * Filter a list of objects keyed by file `path`/`file` to only items in the
+ * currently active changelist. Returns the input unchanged when the user
+ * hasn't created any custom groups — same "no filter, you get everything"
+ * fallback as [`getActivePathspec`].
+ *
+ * Used by AI generation paths (commit message, code review) so what the model
+ * sees lines up with what `save_progress_pathspec` would actually commit.
+ */
+export function filterToActiveByFileKey<T>(items: T[], fileKey: (t: T) => string): T[] {
+  const cls = useChangelistStore.getState()
+  if (cls.groups.length === 0) return items
+  return items.filter(
+    (it) => (cls.assignments[fileKey(it)] ?? DEFAULT_GROUP_ID) === cls.activeId,
+  )
+}

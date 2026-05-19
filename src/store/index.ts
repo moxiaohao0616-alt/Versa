@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import i18n from '../i18n'
-import { getActivePathspec } from '../lib/changelists'
+import { getActivePathspec, filterToActiveByFileKey } from '../lib/changelists'
 
 // Shorthand to call i18n outside React components (store actions etc.). Falls
 // back to the key if translation is missing so we never show literal interp
@@ -112,6 +112,14 @@ export interface ConflictContent {
 export interface ConflictSuggestion {
   recommendation: 'ours' | 'theirs' | 'both'
   reasoning: string
+}
+
+/** A single live PTY tab inside the terminal panel. */
+export interface TermSession {
+  /** Backend session id handed to Rust's pty_open/write/resize/close. */
+  id: string
+  /** User-visible label in the tab strip ("Terminal 1", etc.). */
+  title: string
 }
 
 export interface StashEntry {
@@ -437,6 +445,12 @@ interface VersaState {
   // UI
   activeTab: 'changes' | 'history' | 'branches' | 'compare'
   terminalOpen: boolean
+  // Per-repo terminal sessions. Each repo keeps its own list of PTY tabs
+  // alive across repo switches; switching back restores whatever was
+  // running. PTY id is a random string we hand to Rust's pty_open. Title
+  // defaults to "Terminal N" but the user can rename later (v2).
+  terminalsByRepo: Record<string, TermSession[]>
+  activeTerminalByRepo: Record<string, string | null>
   commitMessage: string
   loading: boolean
   error: string | null
@@ -615,6 +629,11 @@ interface VersaState {
   cancelCurrentAI: () => void
   setTab: (tab: VersaState['activeTab']) => void
   setTerminalOpen: (open: boolean) => void
+  /** Open a fresh terminal tab in the given repo. Returns the new session id. */
+  openNewTerminal: (repoPath: string) => string
+  /** Close a terminal tab. If it was active and others remain, pick a sibling. */
+  closeTerminal: (repoPath: string, sessionId: string) => void
+  setActiveTerminal: (repoPath: string, sessionId: string) => void
   setCommitMessage: (msg: string) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setAIConfig: (cfg: Partial<AIConfig>) => void
@@ -661,6 +680,8 @@ export const useStore = create<VersaState>((set, get) => ({
   recentRepos: JSON.parse(localStorage.getItem('versa:recentRepos') || '[]'),
   activeTab: 'changes',
   terminalOpen: false,
+  terminalsByRepo: {},
+  activeTerminalByRepo: {},
   commitMessage: '',
   loading: false,
   error: null,
@@ -1887,6 +1908,45 @@ export const useStore = create<VersaState>((set, get) => ({
   },
   setTab: (tab) => set({ activeTab: tab }),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
+
+  openNewTerminal: (repoPath) => {
+    const id = `s${Math.random().toString(36).slice(2)}`
+    const prev = get().terminalsByRepo[repoPath] ?? []
+    const title = `Terminal ${prev.length + 1}`
+    set({
+      terminalsByRepo: { ...get().terminalsByRepo, [repoPath]: [...prev, { id, title }] },
+      activeTerminalByRepo: { ...get().activeTerminalByRepo, [repoPath]: id },
+    })
+    return id
+  },
+
+  closeTerminal: (repoPath, sessionId) => {
+    const list = get().terminalsByRepo[repoPath] ?? []
+    const nextList = list.filter((s) => s.id !== sessionId)
+    const active = get().activeTerminalByRepo[repoPath]
+    let nextActive = active
+    if (active === sessionId) {
+      // Pick a neighbor — prefer the one after the closed tab so closing
+      // walks rightward; fall back to the one before if we just closed the
+      // last tab; null if no tabs remain.
+      const idx = list.findIndex((s) => s.id === sessionId)
+      const right = nextList[idx]
+      const left = idx > 0 ? nextList[idx - 1] : undefined
+      nextActive = (right ?? left ?? null)?.id ?? null
+    }
+    set({
+      terminalsByRepo: { ...get().terminalsByRepo, [repoPath]: nextList },
+      activeTerminalByRepo: { ...get().activeTerminalByRepo, [repoPath]: nextActive },
+    })
+    // Fire-and-forget the backend close — UI doesn't block on the IPC.
+    invoke('pty_close', { sessionId }).catch(() => {})
+  },
+
+  setActiveTerminal: (repoPath, sessionId) => {
+    set({
+      activeTerminalByRepo: { ...get().activeTerminalByRepo, [repoPath]: sessionId },
+    })
+  },
   setCommitMessage: (msg) => set({ commitMessage: msg }),
   setTheme: (theme) => {
     localStorage.setItem('versa:theme', theme)
@@ -1916,21 +1976,37 @@ export const useStore = create<VersaState>((set, get) => ({
       return
     }
 
-    // Prefer the staged diff; if nothing staged, fall back to the unstaged
-    // working-tree diff (this is what "保存进度" would commit anyway).
-    const hasStaged = repoStatus.files.some(f => f.stagedStatus)
+    // Scope the AI's view to the active changelist so the generated message
+    // describes what's *actually* about to be committed (save_progress
+    // already hard-scopes to the active group). When the user has no custom
+    // groups, this filter is a no-op and the AI still sees everything.
+    const activePathspec = getActivePathspec(repoStatus.files)
+    if (activePathspec !== null && activePathspec.length === 0) {
+      showToast(tt('toast.active_group_empty'), 'error')
+      return
+    }
+    const activeFiles =
+      activePathspec === null
+        ? repoStatus.files
+        : repoStatus.files.filter((f) => activePathspec.includes(f.path))
+
+    // Prefer the staged diff; if nothing in the active group is staged, fall
+    // back to the unstaged working-tree diff (this is what "保存进度" would
+    // commit anyway, after auto-staging).
+    const hasStaged = activeFiles.some((f) => f.stagedStatus)
 
     // Remember whatever the user typed before — restored on error so we don't
     // wipe their draft for a transient AI failure.
     const original = get().commitMessage
     set({ aiGenerating: true, commitMessage: '' })
     try {
-      const diffs = await invoke<DiffResult[]>('get_diff', {
+      const allDiffs = await invoke<DiffResult[]>('get_diff', {
         path: repoPath,
         file: null,
         staged: hasStaged,
         commitId: null,
       })
+      const diffs = filterToActiveByFileKey(allDiffs, (d) => d.file)
       const diffText = diffsToUnifiedText(diffs)
       if (!diffText.trim()) {
         showToast(tt('toast.no_diff'), 'error')

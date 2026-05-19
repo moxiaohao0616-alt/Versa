@@ -41,7 +41,12 @@ export function buildFileTree<T extends { path: string }>(files: T[]): TreeNode<
   }
 
   for (const f of files) {
-    const parts = f.path.split('/').filter(Boolean)
+    // filter(s => s.trim().length > 0) catches BOTH empty strings (from
+    // double slashes `//`, leading `/`, trailing `/`) AND whitespace-only
+    // segments (a tab/space-named folder, which would otherwise render as
+    // a row that visually has no label). The file's full path on the leaf
+    // is preserved, so stage / discard / diff still hit the right path.
+    const parts = f.path.split('/').filter((s) => s.trim().length > 0)
     if (parts.length === 0) continue
     let cursor: Building<T> = root
     for (let i = 0; i < parts.length - 1; i++) {
@@ -220,7 +225,10 @@ function TreeRow<T extends { path: string }>({
           style={{ fontSize: 13, opacity: 0.75 }}
         />
         <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {node.name}
+          {/* Belt-and-braces: if a name still sneaks through as empty or
+              whitespace-only, fall back to the path's last segment so the
+              row never renders truly blank. */}
+          {node.name.trim() || node.path.split('/').filter(Boolean).pop() || '(unnamed)'}
         </span>
         <span style={{ fontSize: 11, color: 'var(--text3, #999)' }}>{fileCount}</span>
       </div>

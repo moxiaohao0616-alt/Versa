@@ -809,6 +809,8 @@ export const zh = {
 
   terminal: {
     header: 'Terminal',
+    new_tab: '新建终端 tab',
+    empty: '点 + 新开一个终端',
   },
 
   rightsidebar: {

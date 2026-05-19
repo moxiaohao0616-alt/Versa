@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore, diffsToUnifiedText, type DiffResult } from '../../store'
+import { filterToActiveByFileKey, getActivePathspec } from '../../lib/changelists'
 import { renderLiteMarkdown } from '../../lib/lite-markdown'
 
 /** Modal that streams an AI code review of the user's staged changes
@@ -29,12 +30,22 @@ export function AIReviewModal({ onClose }: { onClose: () => void }) {
       if (!repoStatus || repoStatus.files.length === 0) {
         showToast(t('ai_review.no_changes'), 'error'); onClose(); return
       }
-      const hasStaged = repoStatus.files.some(f => f.stagedStatus)
+      // Scope to active changelist so the review covers exactly what
+      // save_progress would commit. No-op when no custom groups exist.
+      const activePathspec = getActivePathspec(repoStatus.files)
+      if (activePathspec !== null && activePathspec.length === 0) {
+        showToast(t('ai_review.no_changes'), 'error'); onClose(); return
+      }
+      const activeFiles = activePathspec === null
+        ? repoStatus.files
+        : repoStatus.files.filter(f => activePathspec.includes(f.path))
+      const hasStaged = activeFiles.some(f => f.stagedStatus)
       let diffText = ''
       try {
-        const diffs = await invoke<DiffResult[]>('get_diff', {
+        const allDiffs = await invoke<DiffResult[]>('get_diff', {
           path: repoPath, file: null, staged: hasStaged, commitId: null,
         })
+        const diffs = filterToActiveByFileKey(allDiffs, d => d.file)
         diffText = diffsToUnifiedText(diffs)
       } catch (e) {
         if (!cancelled) { setError(String(e)); }

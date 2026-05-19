@@ -808,6 +808,8 @@ export const en: Translations = {
 
   terminal: {
     header: 'Terminal',
+    new_tab: 'New terminal tab',
+    empty: 'Click + to open a terminal',
   },
 
   rightsidebar: {

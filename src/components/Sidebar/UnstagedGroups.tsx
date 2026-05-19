@@ -310,8 +310,12 @@ export function UnstagedGroups({
           onCommit={() => {
             const trimmed = newName.trim()
             if (trimmed) {
-              const id = createGroup(trimmed)
-              setActive(id)
+              // Intentionally NOT calling setActive — a freshly created group
+              // is an empty parking lot, not the commit target. Auto-flipping
+              // active here would imply "next Save Progress commits this new
+              // empty group" which is the opposite of what the user wants.
+              // They'll explicitly set active via the ☆ button when needed.
+              createGroup(trimmed)
             }
             setCreating(false)
             setNewName('')
