@@ -3540,7 +3540,7 @@ fn extract_json_object(raw: &str) -> Option<serde_json::Value> {
                 depth += 1
             }
             b'}' => {
-                if depth > 0 { depth -= 1 }
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
                     if let Some(s) = start {
                         let slice = &raw[s..=i];

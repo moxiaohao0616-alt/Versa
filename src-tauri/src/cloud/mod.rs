@@ -2,13 +2,13 @@
 //! local token storage in the OS keychain, and the sync state machine.
 //!
 //! Layout:
-//!   * [`auth`]     — keyring read/write of the device token.
-//!   * [`http`]     — thin reqwest wrapper that injects bearer auth and
-//!                    surfaces server-side error envelopes as Rust errors.
-//!   * [`sync`]     — push/pull/reconcile for the settings/prompts/keymap
-//!                    sync namespaces.
+//!   * [`auth`] — keyring read/write of the device token.
+//!   * [`http`] — thin reqwest wrapper that injects bearer auth and
+//!     surfaces server-side error envelopes as Rust errors.
+//!   * [`sync`] — push/pull/reconcile for the settings/prompts/keymap
+//!     sync namespaces.
 //!   * [`commands`] — Tauri `#[command]` entrypoints exposed to the
-//!                    frontend (`invoke('cloud_*')`).
+//!     frontend (`invoke('cloud_*')`).
 //!
 //! All cloud features are opt-in: nothing in here is touched unless the
 //! user has signed in. A local Versa install can operate forever without
