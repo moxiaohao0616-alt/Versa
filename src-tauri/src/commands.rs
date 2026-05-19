@@ -1473,7 +1473,8 @@ pub async fn ai_suggest_bisect_good(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
@@ -2443,7 +2444,8 @@ pub async fn ai_analyze_merge_risk(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
@@ -2537,7 +2539,8 @@ pub async fn ai_analyze_file_conflict(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
@@ -2913,7 +2916,8 @@ pub async fn ai_generate_commit_message(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
@@ -3295,7 +3299,8 @@ pub async fn ai_explain_commit(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
@@ -3349,7 +3354,8 @@ pub async fn ai_review_staged(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
     let event = format!("ai:stream:{}", stream_id);
@@ -3414,7 +3420,8 @@ pub async fn ai_pr_description(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
     let event = format!("ai:stream:{}", stream_id);
@@ -3472,7 +3479,8 @@ pub async fn ai_resolve_conflict(
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(fe)?;
 
