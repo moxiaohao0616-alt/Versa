@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore } from '../../store'
+import { useStore, type ChangedFile } from '../../store'
 import { StashModal } from '../Stash'
 import { ReflogModal } from '../Reflog'
 import { GitProgressBar } from '../GitProgressBar'
 import { AIReviewModal } from '../AIReview'
+import { UnstagedGroups } from './UnstagedGroups'
+import { FileTree } from './FileTree'
+import {
+  DEFAULT_GROUP_ID,
+  useChangelistStore,
+} from '../../lib/changelists'
 
 export function Sidebar() {
   const { t } = useTranslation()
@@ -19,6 +25,7 @@ export function Sidebar() {
     gitProgress,
     stashes,
     viewAllInCommit,
+    fileTreeView,
   } = useStore()
 
   const [stashOpen, setStashOpen] = useState(false)
@@ -56,6 +63,22 @@ export function Sidebar() {
   const { files, ahead, behind } = repoStatus
   const stagedFiles = files.filter(f => f.stagedStatus)
   const unstagedFiles = files.filter(f => f.unstagedStatus)
+
+  // Active-changelist commit scope. The Sidebar reads this to (a) show a
+  // hint line so the user knows what'll be committed *before* clicking, and
+  // (b) gate the commit button when the active group has nothing in it.
+  const { activeId, assignments, groups } = useChangelistStore()
+  const hasCustomGroups = groups.length > 0
+  const activeName =
+    activeId === DEFAULT_GROUP_ID
+      ? t('sidebar.changelist_default')
+      : groups.find((g) => g.id === activeId)?.name ?? t('sidebar.changelist_default')
+  const filesInActive = hasCustomGroups
+    ? files.filter((f) => (assignments[f.path] ?? DEFAULT_GROUP_ID) === activeId)
+    : files
+  const filesOutsideActive = hasCustomGroups
+    ? files.length - filesInActive.length
+    : 0
 
   const handlePush = async () => {
     setPushing(true)
@@ -203,65 +226,52 @@ export function Sidebar() {
             </div>
           ) : (
             <>
-              {stagedFiles.length > 0 && (
-                <>
-                  <div className="section-label">{t('sidebar.staged')} · {stagedFiles.length} {t('common.files_word')}</div>
-                  <div className="file-list">
-                    {stagedFiles.map(f => (
-                      <div
-                        key={`staged-${f.path}`}
-                        className={`file-item ${selectedFile === f.path && selectedFileStaged ? 'selected' : ''}`}
-                        onClick={() => selectFile(f.path, true)}
-                      >
-                        <span className={`fbadge status-${f.stagedStatus}`}>{f.stagedStatus}</span>
-                        <div className="file-info">
-                          <span className="file-name">{f.path.split('/').pop()}</span>
-                          <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
-                        </div>
-                        <div className="file-actions">
-                          <button className="file-action-btn" title={t('sidebar.unstage')}
-                            onClick={e => { e.stopPropagation(); unstageFile(f.path) }}>
-                            <i className="ti ti-minus" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+              {stagedFiles.length > 0 && (() => {
+                // Inline renderer reused for both flat .map and tree mode.
+                // hidePath suppresses the dir subtitle in tree mode because
+                // the folder hierarchy already conveys that info.
+                const renderStagedRow = (f: ChangedFile) => (
+                  <div
+                    key={`staged-${f.path}`}
+                    className={`file-item ${selectedFile === f.path && selectedFileStaged ? 'selected' : ''}`}
+                    onClick={() => selectFile(f.path, true)}
+                  >
+                    <span className={`fbadge status-${f.stagedStatus}`}>{f.stagedStatus}</span>
+                    <div className="file-info">
+                      <span className="file-name">{f.path.split('/').pop()}</span>
+                      {!fileTreeView && (
+                        <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
+                      )}
+                    </div>
+                    <div className="file-actions">
+                      <button className="file-action-btn" title={t('sidebar.unstage')}
+                        onClick={e => { e.stopPropagation(); unstageFile(f.path) }}>
+                        <i className="ti ti-minus" />
+                      </button>
+                    </div>
                   </div>
-                </>
-              )}
+                )
+                return (
+                  <>
+                    <div className="section-label">{t('sidebar.staged')} · {stagedFiles.length} {t('common.files_word')}</div>
+                    <div className="file-list">
+                      {fileTreeView
+                        ? <FileTree files={stagedFiles} renderFile={renderStagedRow} />
+                        : stagedFiles.map(renderStagedRow)}
+                    </div>
+                  </>
+                )
+              })()}
 
-              {unstagedFiles.length > 0 && (
-                <>
-                  <div className="section-label">{t('sidebar.unstaged')} · {unstagedFiles.length} {t('common.files_word')}</div>
-                  <div className="file-list">
-                    {unstagedFiles.map(f => (
-                      <div
-                        key={`unstaged-${f.path}`}
-                        className={`file-item ${selectedFile === f.path && !selectedFileStaged ? 'selected' : ''}`}
-                        onClick={() => selectFile(f.path, false)}
-                      >
-                        <span className={`fbadge status-${f.unstagedStatus}`}>{f.unstagedStatus}</span>
-                        <div className="file-info">
-                          <span className="file-name">{f.path.split('/').pop()}</span>
-                          <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
-                        </div>
-                        <div className="file-actions">
-                          <button className="file-action-btn" title={t('sidebar.stage')}
-                            onClick={e => { e.stopPropagation(); stageFile(f.path) }}>
-                            <i className="ti ti-plus" />
-                          </button>
-                          {f.unstagedStatus !== '?' && (
-                            <button className="file-action-btn danger" title={t('sidebar.discard')}
-                              onClick={e => { e.stopPropagation(); setDiscardTarget(f.path) }}>
-                              <i className="ti ti-rotate" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
+              <UnstagedGroups
+                unstagedFiles={unstagedFiles}
+                selectedFile={selectedFile}
+                selectedFileStaged={selectedFileStaged}
+                treeMode={fileTreeView}
+                onSelect={(p) => selectFile(p, false)}
+                onStage={stageFile}
+                onDiscard={(p) => setDiscardTarget(p)}
+              />
 
               <div className="commit-area">
                 <div className="commit-label-row">
@@ -293,16 +303,51 @@ export function Sidebar() {
                   onChange={e => setCommitMessage(e.target.value)}
                   rows={3}
                 />
+                {hasCustomGroups && (
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--text-muted, #888)',
+                      margin: '6px 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <i className="ti ti-target" style={{ fontSize: 13 }} />
+                    {filesInActive.length === 0
+                      ? t('sidebar.commit_scope_empty', { name: activeName })
+                      : filesOutsideActive === 0
+                        ? t('sidebar.commit_scope_active_only', {
+                            count: filesInActive.length,
+                            name: activeName,
+                          })
+                        : t('sidebar.commit_scope_with_others', {
+                            count: filesInActive.length,
+                            name: activeName,
+                            others: filesOutsideActive,
+                          })}
+                  </p>
+                )}
                 <button
                   className="btn-primary full"
-                  // Enabled as long as there's a message AND any change in the
-                  // tree (staged or unstaged). When nothing's staged we still
-                  // commit — save_progress on the backend stages everything
-                  // first. This avoids the "I typed a message, why is it
-                  // stuck" trap when users skip the explicit stage step.
-                  disabled={!commitMessage.trim() || files.length === 0}
+                  // Enabled as long as there's a message AND the active group
+                  // (or the whole tree, when no custom groups) has work to
+                  // commit. With custom groups we hard-scope to the active
+                  // changelist — if it's empty, prompt the user instead of
+                  // letting the backend error out.
+                  disabled={
+                    !commitMessage.trim() ||
+                    (hasCustomGroups ? filesInActive.length === 0 : files.length === 0)
+                  }
                   onClick={saveProgress}
-                  title={stagedFiles.length === 0 ? t('sidebar.stage_all_hint') : undefined}
+                  title={
+                    hasCustomGroups && filesInActive.length === 0
+                      ? t('sidebar.commit_scope_empty', { name: activeName })
+                      : stagedFiles.length === 0
+                        ? t('sidebar.stage_all_hint')
+                        : undefined
+                  }
                 >
                   <i className="ti ti-device-floppy" />
                   {t('sidebar.save_progress')}

@@ -21,6 +21,7 @@ import { BranchSwitcher } from './components/BranchSwitcher'
 import { CheatsheetModal } from './components/Cheatsheet'
 import { AboutModal } from './components/About'
 import { OnboardingModal, shouldShowOnboarding } from './components/Onboarding'
+import { SyncStatus } from './cloud/SyncStatus'
 import './styles/app.css'
 
 export default function App() {
@@ -161,6 +162,14 @@ export default function App() {
       }
     }).then(fn => { unlisten = fn })
     return () => { unlisten?.() }
+  }, [])
+
+  // Deep link from the SyncStatus indicator: open Settings (re-dispatched
+  // here for Settings/index.tsx to navigate to the Cloud sub-page).
+  useEffect(() => {
+    const onNav = () => setSettingsOpen(true)
+    window.addEventListener('versa:nav-cloud-settings', onNav)
+    return () => window.removeEventListener('versa:nav-cloud-settings', onNav)
   }, [])
 
   // Streaming progress from git push/pull/clone (one frame per stderr line)
@@ -312,6 +321,7 @@ export default function App() {
         }}
       >
         {repoStatus && <BranchSwitcher variant="indicator" />}
+        <SyncStatus />
       </div>
 
       <UpdateBanner />

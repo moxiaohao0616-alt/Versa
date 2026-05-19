@@ -3,11 +3,14 @@
 // them into structs is just ceremony, so we silence this clippy lint crate-wide.
 #![allow(clippy::too_many_arguments)]
 
+mod cloud;
 mod commands;
 mod menu;
 mod pty;
 mod watcher;
 
+use cloud::commands as cloud_commands;
+use cloud::CloudState;
 use commands::*;
 use pty::PtyRegistry;
 use watcher::WatcherRegistry;
@@ -38,6 +41,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(WatcherRegistry::default())
         .manage(PtyRegistry::default())
+        .manage(CloudState::default())
         .setup(|app| {
             let m = menu::build(app.handle())?;
             app.set_menu(m)?;
@@ -78,6 +82,7 @@ pub fn run() {
             list_tags, create_tag, delete_tag, push_tag, delete_remote_tag,
             // Round 2: reflog + GPG-aware commit
             list_reflog, restore_to_reflog, save_progress_signed,
+            save_progress_pathspec,
             // Round 3: hunk staging + blame
             stage_hunk, unstage_hunk, blame_file,
             // Submodules
@@ -88,6 +93,17 @@ pub fn run() {
             lfs_ls_files, lfs_pull, lfs_fetch,
             // Diagnostics (About modal)
             get_diagnostics,
+            // Versa Cloud (Phase 2: Cloud Sync + AI Gateway groundwork)
+            cloud_commands::cloud_status,
+            cloud_commands::cloud_set_base_url,
+            cloud_commands::cloud_signin_start,
+            cloud_commands::cloud_signin_poll,
+            cloud_commands::cloud_signin_cancel,
+            cloud_commands::cloud_signout,
+            cloud_commands::cloud_list_devices,
+            cloud_commands::cloud_revoke_device,
+            cloud_commands::cloud_sync_pull,
+            cloud_commands::cloud_sync_push,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Versa");

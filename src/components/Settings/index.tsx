@@ -4,6 +4,7 @@ import { useStore } from '../../store'
 import type { AIProvider, RemoteInfo, LfsStatus, LfsPattern, LfsFile } from '../../store'
 import { AboutModal } from '../About'
 import { CheatsheetModal } from '../Cheatsheet'
+import { CloudSettings } from '../../cloud/CloudSettings'
 import i18nInstance, { setLanguage } from '../../i18n'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -71,22 +72,32 @@ const PROVIDERS: ProviderMeta[] = [
 
 const PROVIDER_MAP = new Map(PROVIDERS.map(p => [p.value, p]))
 
-type SubPage = 'main' | 'ai' | 'remotes' | 'lfs'
+type SubPage = 'main' | 'ai' | 'remotes' | 'lfs' | 'cloud'
 
 export function Settings() {
   const [page, setPage] = useState<SubPage>('main')
   const [aboutOpen, setAboutOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
+  // Deep-link from the SyncStatus indicator (and any other future caller):
+  // when the event fires, jump straight to the Cloud sub-page.
+  useEffect(() => {
+    const onNav = () => setPage('cloud')
+    window.addEventListener('versa:nav-cloud-settings', onNav)
+    return () => window.removeEventListener('versa:nav-cloud-settings', onNav)
+  }, [])
+
   let view
   if (page === 'ai')           view = <AISettings onBack={() => setPage('main')} />
   else if (page === 'remotes') view = <RemotesSettings onBack={() => setPage('main')} />
   else if (page === 'lfs')     view = <LfsSettings onBack={() => setPage('main')} />
+  else if (page === 'cloud')   view = <CloudSettings onBack={() => setPage('main')} />
   else view = (
     <MainSettings
       onOpenAI={() => setPage('ai')}
       onOpenRemotes={() => setPage('remotes')}
       onOpenLfs={() => setPage('lfs')}
+      onOpenCloud={() => setPage('cloud')}
       onOpenAbout={() => setAboutOpen(true)}
       onOpenShortcuts={() => setShortcutsOpen(true)}
     />
@@ -104,12 +115,14 @@ function MainSettings({
   onOpenAI,
   onOpenRemotes,
   onOpenLfs,
+  onOpenCloud,
   onOpenAbout,
   onOpenShortcuts,
 }: {
   onOpenAI: () => void
   onOpenRemotes: () => void
   onOpenLfs: () => void
+  onOpenCloud: () => void
   onOpenAbout: () => void
   onOpenShortcuts: () => void
 }) {
@@ -183,6 +196,21 @@ function MainSettings({
             <option value="en">English</option>
           </select>
         </div>
+
+        <div className="settings-row">
+          <div>
+            <p className="settings-row-label">{t('settings.file_tree_view')}</p>
+            <p className="settings-row-desc">{t('settings.file_tree_view_desc')}</p>
+          </div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={useStore(s => s.fileTreeView)}
+              onChange={e => useStore.getState().setFileTreeView(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
       </div>
 
       <div className="settings-section">
@@ -245,6 +273,19 @@ function MainSettings({
           <div className="settings-nav-text">
             <p className="settings-row-label">{t('settings.lfs')}</p>
             <p className="settings-row-desc">{t('settings.lfs_desc')}</p>
+          </div>
+          <div className="settings-nav-status">
+            <i className="ti ti-chevron-right" />
+          </div>
+        </button>
+
+        <button className="settings-nav-row" onClick={onOpenCloud} type="button">
+          <div className="settings-nav-icon">
+            <i className="ti ti-cloud-cog" />
+          </div>
+          <div className="settings-nav-text">
+            <p className="settings-row-label">{t('settings.cloud')}</p>
+            <p className="settings-row-desc">{t('settings.cloud_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />

@@ -4098,6 +4098,63 @@ pub async fn save_progress_signed(
     Ok(oid.to_string())
 }
 
+/// Commit only the listed pathspecs. Used by the Changelists feature so a
+/// "save progress" while a custom changelist is active commits exclusively
+/// the files in that changelist; files in other groups stay where they are
+/// (staged or unstaged, untouched).
+///
+/// Mirrors `save_progress` semantics for the chosen paths: we `git add --
+/// <paths>` first so callers don't have to manually stage every file (an
+/// auto-stage matches the "click one button, save what's selected" UX). We
+/// then `git commit -m … -- <paths>` so the resulting commit contains only
+/// those paths even if other files happen to be staged.
+#[tauri::command]
+pub async fn save_progress_pathspec(
+    path: String,
+    message: String,
+    pathspec: Vec<String>,
+    sign: bool,
+) -> Result<String, String> {
+    if pathspec.is_empty() {
+        return Err("save_progress_pathspec: pathspec must be non-empty".to_string());
+    }
+
+    // Stage the listed paths. Mirrors save_progress's `git add -A` but
+    // scoped — equally handles untracked files (`git add` adds them) and
+    // deletions (`git add <deleted>` records the removal).
+    {
+        let mut args: Vec<&str> = Vec::with_capacity(2 + pathspec.len());
+        args.push("add");
+        args.push("--");
+        for p in &pathspec {
+            args.push(p.as_str());
+        }
+        run_git_simple(&args, &path).await?;
+    }
+
+    // Commit only those paths. The `--` separator guards against any path
+    // that happens to also be a valid ref name (rare but real).
+    {
+        let mut args: Vec<&str> = Vec::with_capacity(5 + pathspec.len());
+        args.push("commit");
+        args.push("-m");
+        args.push(&message);
+        if sign {
+            args.push("-S");
+        }
+        args.push("--");
+        for p in &pathspec {
+            args.push(p.as_str());
+        }
+        run_git_simple(&args, &path).await?;
+    }
+
+    let repo = Repository::open(&path).map_err(fe)?;
+    let head = repo.head().map_err(fe)?;
+    let oid = head.target().ok_or_else(|| "HEAD has no target".to_string())?;
+    Ok(oid.to_string())
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Round 3: Hunk staging · Blame
 // ═══════════════════════════════════════════════════════════════════════════

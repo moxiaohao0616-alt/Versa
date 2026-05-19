@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import i18n from '../i18n'
+import { getActivePathspec } from '../lib/changelists'
 
 // Shorthand to call i18n outside React components (store actions etc.). Falls
 // back to the key if translation is missing so we never show literal interp
@@ -497,6 +498,7 @@ interface VersaState {
   diffIgnoreWhitespace: boolean   // pass `ignore_whitespace=true` to get_diff
   diffWordLevel: boolean   // show inline word-level highlight inside changed lines
   diffSideBySide: boolean  // render the diff as two columns instead of unified
+  fileTreeView: boolean    // render staged/unstaged lists as a folder tree
 
   // Command queued for the embedded Terminal to pick up and run. Cleared by
   // the Terminal once consumed.
@@ -589,6 +591,7 @@ interface VersaState {
   setDiffIgnoreWhitespace: (on: boolean) => void
   setDiffWordLevel: (on: boolean) => void
   setDiffSideBySide: (on: boolean) => void
+  setFileTreeView: (on: boolean) => void
   /** Auto-expand graphLimit until `sha` is in the loaded window. Returns idx, or -1. */
   locateCommit: (sha: string) => Promise<number>
   loadBisectStatus: () => Promise<void>
@@ -650,6 +653,7 @@ export const useStore = create<VersaState>((set, get) => ({
   diffIgnoreWhitespace: localStorage.getItem('versa:diffIgnoreWhitespace') === '1',
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
   diffSideBySide: localStorage.getItem('versa:diffSideBySide') === '1',
+  fileTreeView: localStorage.getItem('versa:fileTreeView') === '1',
   bisectStatus: null,
   currentAiStreamId: null,
   diff: [],
@@ -865,18 +869,41 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   saveProgress: async () => {
-    const { repoPath, commitMessage, gpgSign, showToast } = get()
+    const { repoPath, repoStatus, commitMessage, gpgSign, showToast } = get()
     if (!repoPath || !commitMessage.trim()) return
+
+    // Active-changelist filter: when the user has set up custom groups, the
+    // commit is hard-scoped to files in the active group. Returns null when
+    // no custom groups exist (legacy commit-everything path).
+    const pathspec = repoStatus ? getActivePathspec(repoStatus.files) : null
+
+    if (pathspec !== null && pathspec.length === 0) {
+      showToast(tt('toast.active_group_empty'), 'error')
+      return
+    }
+
     set({ loading: true })
     try {
-      // save_progress_signed forwards to save_progress when sign=false; only
-      // the sign=true path shells out to `git commit -S` and respects the
-      // user's gpg/ssh signing config.
-      const sha = await invoke<string>('save_progress_signed', {
-        path: repoPath,
-        message: commitMessage,
-        sign: gpgSign,
-      })
+      let sha: string
+      if (pathspec === null) {
+        // Legacy path: no custom groups → commit everything (auto-stages all).
+        // save_progress_signed forwards to save_progress when sign=false; only
+        // the sign=true path shells out to `git commit -S`.
+        sha = await invoke<string>('save_progress_signed', {
+          path: repoPath,
+          message: commitMessage,
+          sign: gpgSign,
+        })
+      } else {
+        // Active group path: commit only the listed files, regardless of what
+        // else is staged. Files outside the active group stay where they are.
+        sha = await invoke<string>('save_progress_pathspec', {
+          path: repoPath,
+          message: commitMessage,
+          pathspec,
+          sign: gpgSign,
+        })
+      }
       set({ commitMessage: '' })
       await get().refreshRepo()
       showToast(tt('toast.commit_ok', { short: sha.slice(0, 7) }), 'success')
@@ -925,13 +952,27 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   pushBranch: async () => {
-    const { repoPath, repoStatus, commitMessage, showToast } = get()
+    const { repoPath, repoStatus, commitMessage, gpgSign, showToast } = get()
     if (!repoPath || !repoStatus) return
     try {
       if (repoStatus.files.length > 0) {
         const msg = commitMessage.trim() ||
           `${tt('toast.save_progress_default')} · ${new Date().toLocaleString(i18n.language.startsWith('en') ? 'en-US' : 'zh-CN', { hour12: false })}`
-        await invoke('save_progress', { path: repoPath, message: msg })
+        // Same active-group filter as saveProgress so the implicit "push
+        // commits your unstaged work" shortcut respects the user's grouping.
+        const pathspec = getActivePathspec(repoStatus.files)
+        if (pathspec === null) {
+          await invoke('save_progress', { path: repoPath, message: msg })
+        } else if (pathspec.length > 0) {
+          await invoke('save_progress_pathspec', {
+            path: repoPath,
+            message: msg,
+            pathspec,
+            sign: gpgSign,
+          })
+        }
+        // pathspec.length === 0: active group has nothing — skip the implicit
+        // commit and just push whatever's already on the branch.
         if (commitMessage.trim()) set({ commitMessage: '' })
       }
       await invoke('git_push', { path: repoPath, branch: repoStatus.branch })
@@ -1503,6 +1544,11 @@ export const useStore = create<VersaState>((set, get) => ({
   setDiffSideBySide: (on) => {
     localStorage.setItem('versa:diffSideBySide', on ? '1' : '0')
     set({ diffSideBySide: on })
+  },
+
+  setFileTreeView: (on) => {
+    localStorage.setItem('versa:fileTreeView', on ? '1' : '0')
+    set({ fileTreeView: on })
   },
 
   loadBisectStatus: async () => {
