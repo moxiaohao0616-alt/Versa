@@ -1,17 +1,24 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Versa app mark: two converging git branches forming a V.
-       Transparent background; left stroke is brand green, right stroke is
-       neutral dark. Matches the welcome-screen Logo component. -->
+  <!-- Versa macOS-style app icon.
+       macOS Big Sur+ requires the squircle (continuous-corner rounded
+       rectangle) to be baked into the icon itself — the OS does NOT mask.
+       rx=229 (≈22.4% of 1024) approximates Apple's icon-template radius.
+       The V mark is inset to ~70% of the canvas, giving comfortable
+       padding from the rounded corners. Dark tile + bright green + off-white
+       to fit alongside other dev-tool icons (VS Code, Warp, Zed). -->
 
-  <!-- Left branch — Versa green -->
-  <path d="M 280 256 L 512 800"
-        stroke="#639922" stroke-width="112"
-        stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  <circle cx="280" cy="256" r="96" fill="#639922" />
+  <!-- Dark slate tile -->
+  <rect width="1024" height="1024" rx="229" ry="229" fill="#1c1c1c" />
 
-  <!-- Right branch — neutral dark -->
-  <path d="M 744 256 L 512 800"
-        stroke="#1a1a18" stroke-width="112"
+  <!-- Left branch — brighter Versa green for dark-tile contrast -->
+  <path d="M 308 304 L 512 750"
+        stroke="#7eb83a" stroke-width="100"
         stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  <circle cx="744" cy="256" r="96" fill="#1a1a18" />
+  <circle cx="308" cy="304" r="80" fill="#7eb83a" />
+
+  <!-- Right branch — off-white for dark-tile contrast -->
+  <path d="M 716 304 L 512 750"
+        stroke="#e8e8e8" stroke-width="100"
+        stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <circle cx="716" cy="304" r="80" fill="#e8e8e8" />
 </svg>
