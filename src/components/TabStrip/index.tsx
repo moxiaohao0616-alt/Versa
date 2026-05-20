@@ -38,32 +38,44 @@ export function TabStrip() {
     closeTab(path)
   }
 
-  // Recent repos not currently in any open tab
-  const openSet = new Set(tabs.map(t => t.path))
+  // Recents not currently held by any open workspace (matches either by the
+  // workspace root or by any of its sub-repos so reopens dedupe correctly).
+  // `?.` guards against HMR-stale tabs that still hold the pre-workspace shape.
+  const openSet = new Set<string>()
+  for (const tab of tabs) {
+    if (tab.root) openSet.add(tab.root)
+    if (tab.repos) for (const r of tab.repos) openSet.add(r.path)
+  }
   const recentNotOpen = recentRepos.filter(r => !openSet.has(r.path))
 
   return (
     <div className="tabstrip">
       <div className="tabstrip-tabs">
-        {tabs.map(tab => (
-          <button
-            key={tab.path}
-            className={`tab ${repoPath === tab.path ? 'active' : ''}`}
-            onClick={() => switchTab(tab.path)}
-            title={tab.path}
-          >
-            <i className="ti ti-folder" />
-            <span className="tab-name">{tab.name}</span>
-            <span
-              className="tab-close"
-              role="button"
-              aria-label={t('tabstrip.close_tab')}
-              onClick={e => handleCloseTab(e, tab.path)}
+        {tabs.map(tab => {
+          const repos = tab.repos ?? []
+          const isActive = repos.some(r => r.path === repoPath)
+          const multi = repos.length > 1
+          return (
+            <button
+              key={tab.root}
+              className={`tab ${isActive ? 'active' : ''}`}
+              onClick={() => switchTab(tab.root)}
+              title={multi ? `${tab.root} (${repos.length} repos)` : tab.root}
             >
-              <i className="ti ti-x" />
-            </span>
-          </button>
-        ))}
+              <i className={multi ? 'ti ti-folders' : 'ti ti-folder'} />
+              <span className="tab-name">{tab.name}</span>
+              {multi && <span className="tab-count">{repos.length}</span>}
+              <span
+                className="tab-close"
+                role="button"
+                aria-label={t('tabstrip.close_tab')}
+                onClick={e => handleCloseTab(e, tab.root)}
+              >
+                <i className="ti ti-x" />
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       <div className="tabstrip-add" ref={menuRef}>

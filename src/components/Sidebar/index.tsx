@@ -38,6 +38,11 @@ export function Sidebar() {
 
   const [discardTarget, setDiscardTarget] = useState<string | null>(null)
 
+  // Subscribe to the changelist store at the top so hook order stays stable
+  // across renders where `repoStatus` momentarily flips to null (e.g. during
+  // a sub-repo switch, before the new repo's `open_repo` resolves).
+  const { activeId, assignments, groups } = useChangelistStore()
+
   // Auto-pick a file to show as soon as the repo (or tab) loads so the right
   // pane isn't blank on first arrival. Prefer the first unstaged file (the
   // common "still being worked on" case); fall back to staged. Skip when:
@@ -64,10 +69,17 @@ export function Sidebar() {
   const stagedFiles = files.filter(f => f.stagedStatus)
   const unstagedFiles = files.filter(f => f.unstagedStatus)
 
+  // Force tree view once the file count crosses a threshold — flat-mode
+  // rendering of thousands of rows is the dominant cost when switching into
+  // a sub-repo on a freshly-init'd monorepo (loom + node_modules). Tree mode
+  // pairs with FileTree's auto-collapse so initial paint stays cheap.
+  const HUGE_FILE_LIST = 500
+  const effectiveTreeView =
+    fileTreeView || stagedFiles.length > HUGE_FILE_LIST || unstagedFiles.length > HUGE_FILE_LIST
+
   // Active-changelist commit scope. The Sidebar reads this to (a) show a
   // hint line so the user knows what'll be committed *before* clicking, and
   // (b) gate the commit button when the active group has nothing in it.
-  const { activeId, assignments, groups } = useChangelistStore()
   const hasCustomGroups = groups.length > 0
   const activeName =
     activeId === DEFAULT_GROUP_ID
@@ -239,7 +251,7 @@ export function Sidebar() {
                     <span className={`fbadge status-${f.stagedStatus}`}>{f.stagedStatus}</span>
                     <div className="file-info">
                       <span className="file-name">{f.path.split('/').pop()}</span>
-                      {!fileTreeView && (
+                      {!effectiveTreeView && (
                         <span className="file-path">{f.path.split('/').slice(0, -1).join('/')}</span>
                       )}
                     </div>
@@ -255,8 +267,8 @@ export function Sidebar() {
                   <>
                     <div className="section-label">{t('sidebar.staged')} · {stagedFiles.length} {t('common.files_word')}</div>
                     <div className="file-list">
-                      {fileTreeView
-                        ? <FileTree files={stagedFiles} renderFile={renderStagedRow} />
+                      {effectiveTreeView
+                        ? <FileTree files={stagedFiles} renderFile={renderStagedRow} resetKey={repoPath ?? ''} />
                         : stagedFiles.map(renderStagedRow)}
                     </div>
                   </>
@@ -267,7 +279,8 @@ export function Sidebar() {
                 unstagedFiles={unstagedFiles}
                 selectedFile={selectedFile}
                 selectedFileStaged={selectedFileStaged}
-                treeMode={fileTreeView}
+                treeMode={effectiveTreeView}
+                resetKey={repoPath ?? ''}
                 onSelect={(p) => selectFile(p, false)}
                 onStage={stageFile}
                 onDiscard={(p) => setDiscardTarget(p)}

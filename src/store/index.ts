@@ -4,6 +4,14 @@ import { listen } from '@tauri-apps/api/event'
 import i18n from '../i18n'
 import { getActivePathspec, filterToActiveByFileKey } from '../lib/changelists'
 
+// Monotonic generation for diff-loading async actions. Each new selectFile /
+// viewAllInCommit call increments this and captures the value; when the
+// underlying invoke resolves, the action only commits its result if its
+// captured value still equals the current one. Prevents the "rapid-click
+// race" where a slower earlier request lands AFTER a faster later request
+// and leaves `diff` state out of sync with `selectedFile`.
+let diffLoadGen = 0
+
 // Shorthand to call i18n outside React components (store actions etc.). Falls
 // back to the key if translation is missing so we never show literal interp
 // placeholders to users.
@@ -88,6 +96,25 @@ export interface RepoStatus {
   state: RepoState
 }
 
+export interface WorkspaceSubRepo {
+  path: string
+  name: string
+}
+
+/** Output of the Rust `scan_workspace` command. */
+export interface WorkspaceScan {
+  /** 'single' = 1 repo total; 'multi' = 2+ repos (including root if it's
+   *  one); 'empty' = neither root nor any child is a git repo. */
+  kind: 'single' | 'multi' | 'empty'
+  /** Resolved workspace root path (no trailing slash). */
+  root: string
+  /** Whether `root` itself is a git repo. False for an uninitialized
+   *  project folder containing vendored sub-repos. */
+  rootIsRepo: boolean
+  /** All repos found. Root first (if rootIsRepo), then sub-repos by name. */
+  repos: WorkspaceSubRepo[]
+}
+
 export interface ConflictFile {
   path: string
   isBinary: boolean
@@ -114,12 +141,34 @@ export interface ConflictSuggestion {
   reasoning: string
 }
 
-/** A single live PTY tab inside the terminal panel. */
+/** A single live PTY tab inside the terminal panel.
+ *
+ *  Two flavors:
+ *  - **Shell tab**: only `id` + `title`, fields below are undefined. Spawned
+ *    with `$SHELL -l`.
+ *  - **Agent tab**: `agentId`, `agentCommand`, `agentArgs` populated at
+ *    creation time. Spawned with the agent's binary instead of a shell. On
+ *    process exit, `promoteAgentExitToChangelist` snapshot-diffs against
+ *    `preUnstagedSnapshot` and writes back `changelistId` if any files were
+ *    touched.
+ */
 export interface TermSession {
   /** Backend session id handed to Rust's pty_open/write/resize/close. */
   id: string
-  /** User-visible label in the tab strip ("Terminal 1", etc.). */
+  /** User-visible label in the tab strip ("Terminal 1", "Claude", etc.). */
   title: string
+
+  // ─── agent-tab fields (all undefined for shell tabs) ───
+  agentId?: string
+  agentCommand?: string
+  agentArgs?: string[]
+  /** Snapshot of unstaged file paths at the moment this tab was opened.
+   *  Used by the exit handler to figure out which files the agent touched. */
+  preUnstagedSnapshot?: string[]
+  /** Flipped true after `pty:exit` for this session. Shows a ✓ on the tab. */
+  exited?: boolean
+  /** Id of the changelist auto-created after exit. */
+  changelistId?: string
 }
 
 export interface StashEntry {
@@ -341,9 +390,28 @@ function loadAIConfig(): AIConfig {
   }
 }
 
-export interface RepoTab {
-  path: string
-  name: string
+/** One open "tab" in the UI. For 99% of users this is a single repo (N=1 in
+ *  `repos`), in which case the workspace abstraction is invisible — tab name
+ *  = repo name, no sub-repo strip, all current UX. For folders containing
+ *  multiple repos (N>1), the workspace groups them; a sub-repo switcher
+ *  appears below the TabStrip. */
+export interface WorkspaceTab {
+  root: string                  // path the user picked (parent for N>1, repo for N=1)
+  name: string                  // tab display name
+  repos: WorkspaceSubRepo[]     // 1+ sub-repos (length 1 = single-repo tab)
+  activeRepo: string            // sub-repo currently focused within this tab
+  /** Whether `root` itself is a git repo. When false on a multi-workspace,
+   *  the dashboard surfaces an "Initialize git here" card so the user can
+   *  adopt the root folder (e.g. a pnpm monorepo containing vendored repos)
+   *  without dropping to a terminal. */
+  rootIsRepo: boolean
+  /** Which surface this workspace shows in the main area.
+   *  - 'overview': workspace dashboard (cards of each sub-repo). Default for
+   *    multi-repo workspaces — answers "what's in this workspace?".
+   *  - 'repo': normal single-repo UI (Sidebar + Diff). Forced for N=1 since
+   *    the dashboard would be a card to itself. Multi-repo workspaces flip
+   *    here when the user clicks any sub-repo pill or card. */
+  view: 'overview' | 'repo'
 }
 
 /** Per-repo state slices that should be preserved when switching tabs. */
@@ -389,14 +457,42 @@ const blankSnapshot = (): RepoSnapshot => ({
   graphSelected: null,
 })
 
+/** Find the workspace tab that contains `repoPath` as one of its sub-repos. */
+function findWorkspaceFor(tabs: WorkspaceTab[], repoPath: string | null): WorkspaceTab | null {
+  if (!repoPath) return null
+  return tabs.find(t => t.repos.some(r => r.path === repoPath)) ?? null
+}
+
+/** Find the workspace tab by its root path (the path the user picked). */
+function findWorkspaceByRoot(tabs: WorkspaceTab[], root: string): WorkspaceTab | null {
+  return tabs.find(t => t.root === root) ?? null
+}
+
 /**
- * Swap the backend file watcher to follow the active tab. Inactive tabs are
- * left unwatched — they get refreshed via `open_repo` on next switchTab.
+ * Make sure the backend is watching `newPath`. Old watchers are intentionally
+ * left running: on macOS each `start_watching` call sets up a recursive
+ * FSEvents subscription, which for a monorepo with node_modules can take a
+ * noticeable chunk of the tab-switch cost. The JS event handler already
+ * filters out events whose `eventPath !== current repoPath`, so leaking
+ * watchers across switches is harmless and re-activating an already-watched
+ * path is free (idempotent on the Rust side).
+ *
+ * Only stops the previous watcher when there's no new tab to switch to
+ * (i.e. closing the last tab) — see `closeTab` for explicit cleanup.
  */
 function swapWatcher(oldPath: string | null, newPath: string | null) {
   if (oldPath === newPath) return
-  if (oldPath) invoke('stop_watching', { path: oldPath }).catch(() => {})
+  if (oldPath && !newPath) invoke('stop_watching', { path: oldPath }).catch(() => {})
   if (newPath) invoke('start_watching', { path: newPath }).catch(() => {})
+}
+
+/** Stop watchers for every sub-repo in a closed workspace. Called from
+ *  closeTab so we don't leak unbounded FSEvents subscriptions across the
+ *  lifetime of the app. */
+function stopAllWatchers(repoPaths: string[]) {
+  for (const p of repoPaths) {
+    invoke('stop_watching', { path: p }).catch(() => {})
+  }
 }
 
 const snapshotFrom = (s: VersaState): RepoSnapshot => ({
@@ -423,9 +519,11 @@ const snapshotFrom = (s: VersaState): RepoSnapshot => ({
 // ── Store ────────────────────────────────────────────────────────────────────
 
 interface VersaState {
-  // Multi-tab: ordered list of open repos. Each tab's per-repo state is
-  // stashed in `tabSnapshots` when it's not the active one.
-  tabs: RepoTab[]
+  // Multi-tab: ordered list of open workspaces. Each workspace contains 1+
+  // sub-repos; the N=1 case behaves identically to the old "tab = repo" model.
+  // Per-sub-repo state is stashed in `tabSnapshots` (keyed by sub-repo path),
+  // so switching sub-repos within a workspace also preserves their state.
+  tabs: WorkspaceTab[]
   tabSnapshots: Record<string, RepoSnapshot>
 
   // Repo (top-level reflects the *active* tab's state)
@@ -520,8 +618,19 @@ interface VersaState {
 
   // Actions
   openRepo: (path: string) => Promise<void>
-  switchTab: (path: string) => Promise<void>
-  closeTab: (path: string) => Promise<void>
+  /** Switch to a workspace tab by its root path. */
+  switchTab: (root: string) => Promise<void>
+  /** Close a workspace tab (and clean up snapshots for all its sub-repos). */
+  closeTab: (root: string) => Promise<void>
+  /** Within the workspace that contains it, switch the focused sub-repo.
+   *  Also flips that workspace's `view` to 'repo'. */
+  switchSubRepo: (repoPath: string) => Promise<void>
+  /** Set the workspace view mode. Used to flip to the overview dashboard
+   *  on multi-repo workspaces, or back to repo mode. */
+  setWorkspaceView: (root: string, view: 'overview' | 'repo') => void
+  /** `git init` the workspace root and add it as the first repo in the
+   *  tab's repos[]. Used by the dashboard's "Initialize git here" card. */
+  initWorkspaceRoot: (root: string) => Promise<void>
   selectFile: (path: string, staged?: boolean, commitId?: string) => Promise<void>
   selectCommit: (commit: SelectedCommitInfo | null) => Promise<void>
   viewAllInCommit: () => Promise<void>
@@ -631,6 +740,19 @@ interface VersaState {
   setTerminalOpen: (open: boolean) => void
   /** Open a fresh terminal tab in the given repo. Returns the new session id. */
   openNewTerminal: (repoPath: string) => string
+  /** Open a tab that runs an AI agent CLI (e.g. claude/codex) instead of
+   *  the shell. Snapshots the unstaged file set so the exit handler can
+   *  group new edits into a "Agent: ..." changelist. */
+  openAgentTerminal: (
+    repoPath: string,
+    agent: { id: string; name: string; command: string; extraArgs: string },
+  ) => string
+  /** Mark an agent tab as exited (its process finished). Called from the
+   *  TerminalPane pty:exit listener. */
+  markAgentTerminalExited: (sessionId: string) => void
+  /** Stamp the auto-created changelist id onto the corresponding session
+   *  so the tab can show "→ <changelist>" later. */
+  markAgentChangelist: (sessionId: string, changelistId: string) => void
   /** Close a terminal tab. If it was active and others remain, pick a sibling. */
   closeTerminal: (repoPath: string, sessionId: string) => void
   setActiveTerminal: (repoPath: string, sessionId: string) => void
@@ -693,65 +815,175 @@ export const useStore = create<VersaState>((set, get) => ({
 
   openRepo: async (path: string) => {
     const state = get()
-    // Already open — just switch to it
-    if (state.tabs.some(t => t.path === path)) {
-      await get().switchTab(path)
+
+    // Fast path 1: if the path is the sub-repo of an open workspace, activate
+    // it within that workspace (no scan, no reopen).
+    const wsHolding = findWorkspaceFor(state.tabs, path)
+    if (wsHolding) {
+      if (wsHolding.activeRepo !== state.repoPath || state.repoPath !== path) {
+        await get().switchTab(wsHolding.root)
+        if (wsHolding.activeRepo !== path) await get().switchSubRepo(path)
+      }
       return
     }
+    // Fast path 2: workspace root already open — just switch to it.
+    const wsByRoot = findWorkspaceByRoot(state.tabs, path)
+    if (wsByRoot) {
+      await get().switchTab(wsByRoot.root)
+      return
+    }
+
     set({ loading: true, error: null })
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path })
-      const name = path.split('/').filter(Boolean).pop() ?? path
+      const scan = await invoke<WorkspaceScan>('scan_workspace', { path })
 
-      // Stash current tab's state before swapping in the new one
-      const stashed = state.repoPath
-        ? { ...state.tabSnapshots, [state.repoPath]: snapshotFrom(state) }
+      if (scan.kind === 'empty') {
+        throw new Error(`'${path}' isn't a git repository and contains no sub-repos.`)
+      }
+
+      // After scan, re-check dedup against the canonical path(s) — `discover`
+      // may have walked up for the single case.
+      if (scan.kind === 'single') {
+        const resolved = scan.repos[0].path
+        const existing = findWorkspaceFor(get().tabs, resolved)
+        if (existing) {
+          set({ loading: false })
+          await get().switchTab(existing.root)
+          if (existing.activeRepo !== resolved) await get().switchSubRepo(resolved)
+          return
+        }
+      } else {
+        const existing = findWorkspaceByRoot(get().tabs, scan.root)
+        if (existing) {
+          set({ loading: false })
+          await get().switchTab(existing.root)
+          return
+        }
+      }
+
+      const wsName = scan.kind === 'single'
+        ? scan.repos[0].name
+        : (scan.root.split('/').filter(Boolean).pop() ?? scan.root)
+      const activeRepo = scan.repos[0].path
+      const isMulti = scan.kind === 'multi'
+      const newWorkspace: WorkspaceTab = {
+        root: scan.root,
+        name: wsName,
+        repos: scan.repos,
+        activeRepo,
+        rootIsRepo: scan.rootIsRepo,
+        // Multi-repo workspaces open to the dashboard so the user lands on
+        // a "what's in this workspace" view rather than being dropped into
+        // an arbitrary sub-repo without context.
+        view: isMulti ? 'overview' : 'repo',
+      }
+
+      // Stash current tab's per-sub-repo state before swapping
+      const prevPath = state.repoPath
+      const stashed = prevPath
+        ? { ...state.tabSnapshots, [prevPath]: snapshotFrom(state) }
         : state.tabSnapshots
 
-      const entry: RecentRepo = { path, name, lastOpened: Date.now() }
-      const prev: RecentRepo[] = JSON.parse(localStorage.getItem('versa:recentRepos') || '[]')
-      const updated = [entry, ...prev.filter(r => r.path !== path)].slice(0, 10)
-      localStorage.setItem('versa:recentRepos', JSON.stringify(updated))
+      // Recents: store the workspace root so reopening reconstructs the same
+      // tab (single-repo case: root === repo path, behaves like before).
+      const entry: RecentRepo = { path: scan.root, name: wsName, lastOpened: Date.now() }
+      const prevRecents: RecentRepo[] = JSON.parse(localStorage.getItem('versa:recentRepos') || '[]')
+      const updatedRecents = [entry, ...prevRecents.filter(r => r.path !== scan.root)].slice(0, 10)
+      localStorage.setItem('versa:recentRepos', JSON.stringify(updatedRecents))
 
-      const prevPath = state.repoPath
+      // For SINGLE workspaces we still block on `open_repo(activeRepo)` so the
+      // Sidebar/Diff has data the moment it mounts — single-repo UX needs that
+      // synchronous landing. For MULTI workspaces we drop the blocking await
+      // entirely: the dashboard handles per-card loading states, and on large
+      // monorepos like loom (where each `open_repo` does a full libgit2 status
+      // including node_modules), waiting on N parallel calls before painting
+      // anything is the dominant cause of perceived lag.
+      let initialStatus: RepoStatus | null = null
+      if (!isMulti) {
+        initialStatus = await invoke<RepoStatus>('open_repo', { path: activeRepo })
+      }
+
       set({
-        tabs: [...state.tabs, { path, name }],
+        tabs: [...state.tabs, newWorkspace],
         tabSnapshots: stashed,
-        repoPath: path,
+        repoPath: activeRepo,
         ...blankSnapshot(),
-        repoStatus: status,
-        recentRepos: updated,
+        repoStatus: initialStatus,
+        recentRepos: updatedRecents,
         loading: false,
       })
-      swapWatcher(prevPath, path)
+      swapWatcher(prevPath, activeRepo)
       get().loadProject()
+
+      // For MULTI: lazily populate per-sub-repo status AFTER the first paint.
+      // We don't await — the dashboard renders immediately with "loading"
+      // cards, then each one updates as its status lands. Functional `set`
+      // guards against races where the user closed the tab mid-load.
+      if (isMulti) {
+        for (const r of scan.repos) {
+          void (async () => {
+            try {
+              const st = await invoke<RepoStatus>('open_repo', { path: r.path })
+              set(s => {
+                // Tab may have closed (workspace gone) — drop the result.
+                if (!s.tabs.some(t => t.root === scan.root)) return s
+                const next: Record<string, RepoSnapshot> = {
+                  ...s.tabSnapshots,
+                  [r.path]: { ...(s.tabSnapshots[r.path] ?? blankSnapshot()), repoStatus: st },
+                }
+                // If this is the currently-focused sub-repo, also reflect
+                // into the live `repoStatus` slot so Sidebar/Diff (when the
+                // user clicks through into repo view) sees fresh data.
+                if (s.repoPath === r.path) {
+                  return { tabSnapshots: next, repoStatus: st }
+                }
+                return { tabSnapshots: next }
+              })
+            } catch {
+              // Per-repo failures stay silent — card just shows "couldn't load".
+            }
+          })()
+        }
+      }
+
+      if (isMulti) {
+        get().showToast(
+          `Opened ${scan.repos.length} sub-repos from ${wsName}`,
+          'success',
+        )
+      } else if (activeRepo !== path) {
+        get().showToast(`Opened repo at ${activeRepo}`, 'success')
+      }
     } catch (e) {
-      set({ error: String(e), loading: false })
+      const msg = String(e)
+      set({ error: msg, loading: false })
+      get().showToast(msg, 'error')
     }
   },
 
-  switchTab: async (path: string) => {
+  switchTab: async (root: string) => {
     const state = get()
-    if (state.repoPath === path) return
-    if (!state.tabs.some(t => t.path === path)) return
+    const ws = findWorkspaceByRoot(state.tabs, root)
+    if (!ws) return
+    if (state.repoPath === ws.activeRepo) return
 
-    // Stash the current tab's state, then restore the target tab's
+    // Stash whatever sub-repo we're leaving, then restore the workspace's
+    // last-active sub-repo's snapshot.
     const stashed = state.repoPath
       ? { ...state.tabSnapshots, [state.repoPath]: snapshotFrom(state) }
       : state.tabSnapshots
-    const targetSnap = stashed[path] ?? blankSnapshot()
+    const targetSnap = stashed[ws.activeRepo] ?? blankSnapshot()
 
     const prevPath = state.repoPath
     set({
       tabSnapshots: stashed,
-      repoPath: path,
+      repoPath: ws.activeRepo,
       ...targetSnap,
     })
-    swapWatcher(prevPath, path)
+    swapWatcher(prevPath, ws.activeRepo)
 
-    // Refresh in background — snapshot may be stale (e.g. file changed since)
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path })
+      const status = await invoke<RepoStatus>('open_repo', { path: ws.activeRepo })
       set({ repoStatus: status })
       get().loadProject()
     } catch (e) {
@@ -759,17 +991,103 @@ export const useStore = create<VersaState>((set, get) => ({
     }
   },
 
-  closeTab: async (path: string) => {
+  switchSubRepo: async (repoPath: string) => {
     const state = get()
-    if (!state.tabs.some(t => t.path === path)) return
+    const ws = findWorkspaceFor(state.tabs, repoPath)
+    if (!ws) return
 
-    const idx = state.tabs.findIndex(t => t.path === path)
-    const tabs = state.tabs.filter(t => t.path !== path)
+    // If we're already on this sub-repo but the workspace is in overview
+    // mode, just flip the view (no snapshot work needed).
+    if (state.repoPath === repoPath && ws.view === 'repo') return
+
+    const stashed = state.repoPath
+      ? { ...state.tabSnapshots, [state.repoPath]: snapshotFrom(state) }
+      : state.tabSnapshots
+    const targetSnap = stashed[repoPath] ?? blankSnapshot()
+
+    // Remember which sub-repo this workspace was focused on so switchTab can
+    // restore it later. Flip the view to 'repo' so the main area renders
+    // Sidebar+Diff (not the dashboard).
+    const tabs: WorkspaceTab[] = state.tabs.map(t =>
+      t.root === ws.root ? { ...t, activeRepo: repoPath, view: 'repo' as const } : t,
+    )
+
+    const prevPath = state.repoPath
+    set({
+      tabs,
+      tabSnapshots: stashed,
+      repoPath,
+      ...targetSnap,
+    })
+    swapWatcher(prevPath, repoPath)
+
+    try {
+      const status = await invoke<RepoStatus>('open_repo', { path: repoPath })
+      set({ repoStatus: status })
+      get().loadProject()
+    } catch (e) {
+      set({ error: String(e) })
+    }
+  },
+
+  setWorkspaceView: (root: string, view: 'overview' | 'repo') => {
+    set(state => ({
+      tabs: state.tabs.map(t => (t.root === root ? { ...t, view } : t)),
+    }))
+  },
+
+  initWorkspaceRoot: async (root: string) => {
+    const state = get()
+    const ws = findWorkspaceByRoot(state.tabs, root)
+    if (!ws || ws.rootIsRepo) return  // already a repo, nothing to do
+    try {
+      const status = await invoke<RepoStatus>('git_init_repo', { path: root })
+      const rootName = root.split('/').filter(Boolean).pop() ?? root
+      // Prepend root as the first repo; leave existing sub-repos in order.
+      const updatedRepos: WorkspaceSubRepo[] = [
+        { path: root, name: rootName },
+        ...ws.repos,
+      ]
+      // Seed a snapshot for the freshly-initialised root so the dashboard
+      // card shows live status without a separate fetch.
+      const seededSnap: RepoSnapshot = { ...blankSnapshot(), repoStatus: status }
+      set(s => ({
+        tabs: s.tabs.map(t =>
+          t.root === root
+            ? { ...t, repos: updatedRepos, rootIsRepo: true }
+            : t,
+        ),
+        tabSnapshots: { ...s.tabSnapshots, [root]: seededSnap },
+      }))
+      get().showToast(`Initialized empty git repo at ${rootName}`, 'success')
+    } catch (e) {
+      const msg = String(e)
+      set({ error: msg })
+      get().showToast(msg, 'error')
+    }
+  },
+
+  closeTab: async (root: string) => {
+    const state = get()
+    const ws = findWorkspaceByRoot(state.tabs, root)
+    if (!ws) return
+
+    const idx = state.tabs.findIndex(t => t.root === root)
+    const tabs = state.tabs.filter(t => t.root !== root)
+    // Drop snapshots for every sub-repo in the closed workspace.
     const tabSnapshots = { ...state.tabSnapshots }
-    delete tabSnapshots[path]
+    for (const r of ws.repos) {
+      delete tabSnapshots[r.path]
+    }
+    // Stop OS-level file watchers for every sub-repo in the closed workspace
+    // (swapWatcher leaks watchers across tab switches for perf — closeTab is
+    // the canonical cleanup point).
+    stopAllWatchers(ws.repos.map(r => r.path))
 
-    // Closing an inactive tab — leave current state alone
-    if (state.repoPath !== path) {
+    const closingActive = state.repoPath !== null && ws.repos.some(r => r.path === state.repoPath)
+
+    // Closing an inactive workspace — leave current state alone
+    if (!closingActive) {
       set({ tabs, tabSnapshots })
       return
     }
@@ -777,22 +1095,22 @@ export const useStore = create<VersaState>((set, get) => ({
     // Closed the last tab — back to welcome
     if (tabs.length === 0) {
       set({ tabs: [], tabSnapshots: {}, repoPath: null, ...blankSnapshot() })
-      swapWatcher(path, null)
       return
     }
 
     // Closed the active tab — switch to neighbor (prefer the one to the right)
-    const nextTab = tabs[Math.min(idx, tabs.length - 1)]
-    const targetSnap = tabSnapshots[nextTab.path] ?? blankSnapshot()
+    const nextWs = tabs[Math.min(idx, tabs.length - 1)]
+    const targetSnap = tabSnapshots[nextWs.activeRepo] ?? blankSnapshot()
+    const prevPath = state.repoPath
     set({
       tabs,
       tabSnapshots,
-      repoPath: nextTab.path,
+      repoPath: nextWs.activeRepo,
       ...targetSnap,
     })
-    swapWatcher(path, nextTab.path)
+    swapWatcher(prevPath, nextWs.activeRepo)
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path: nextTab.path })
+      const status = await invoke<RepoStatus>('open_repo', { path: nextWs.activeRepo })
       set({ repoStatus: status })
       get().loadProject()
     } catch (e) {
@@ -829,6 +1147,7 @@ export const useStore = create<VersaState>((set, get) => ({
   selectFile: async (path: string, staged = false, commitId?: string) => {
     const { repoPath, diffIgnoreWhitespace } = get()
     if (!repoPath) return
+    const myGen = ++diffLoadGen
     set({ selectedFile: path, selectedFileStaged: staged, loading: true, activeTab: 'changes' })
     try {
       const diff = await invoke<DiffResult[]>('get_diff', {
@@ -838,8 +1157,11 @@ export const useStore = create<VersaState>((set, get) => ({
         commitId: commitId ?? null,
         ignoreWhitespace: diffIgnoreWhitespace,
       })
+      // Drop stale results: a newer selectFile / viewAllInCommit superseded us.
+      if (myGen !== diffLoadGen) return
       set({ diff, loading: false })
     } catch (e) {
+      if (myGen !== diffLoadGen) return
       set({ error: String(e), loading: false })
     }
   },
@@ -847,14 +1169,17 @@ export const useStore = create<VersaState>((set, get) => ({
   viewAllInCommit: async () => {
     const { repoPath, selectedCommit, diffIgnoreWhitespace } = get()
     if (!repoPath || !selectedCommit) return
+    const myGen = ++diffLoadGen
     set({ selectedFile: null, loading: true })
     try {
       const diff = await invoke<DiffResult[]>('get_diff', {
         path: repoPath, file: null, staged: null, commitId: selectedCommit.id,
         ignoreWhitespace: diffIgnoreWhitespace,
       })
+      if (myGen !== diffLoadGen) return
       set({ diff, loading: false })
     } catch (e) {
+      if (myGen !== diffLoadGen) return
       set({ error: String(e), loading: false })
     }
   },
@@ -975,6 +1300,20 @@ export const useStore = create<VersaState>((set, get) => ({
   pushBranch: async () => {
     const { repoPath, repoStatus, commitMessage, gpgSign, showToast } = get()
     if (!repoPath || !repoStatus) return
+    // Fail fast when the repo has no remotes — `git push origin` would otherwise
+    // either error with an unfriendly fatal message after the spawn round-trip,
+    // or worse, hang while git probes a misconfigured remote. Tell the user
+    // exactly what to do instead.
+    try {
+      const remotes = await invoke<RemoteInfo[]>('list_remotes', { path: repoPath })
+      if (remotes.length === 0) {
+        showToast(tt('toast.no_remote_push'), 'error')
+        return
+      }
+    } catch {
+      // If list_remotes itself fails (e.g., index lock), fall through and let
+      // the actual push surface that error.
+    }
     try {
       if (repoStatus.files.length > 0) {
         const msg = commitMessage.trim() ||
@@ -1008,6 +1347,13 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, showToast } = get()
     if (!repoPath) return
     try {
+      const remotes = await invoke<RemoteInfo[]>('list_remotes', { path: repoPath })
+      if (remotes.length === 0) {
+        showToast(tt('toast.no_remote_pull'), 'error')
+        return
+      }
+    } catch {}
+    try {
       await invoke('git_pull', { path: repoPath })
       await get().refreshRepo()
       showToast(tt('toast.pull_ok'), 'success')
@@ -1019,6 +1365,13 @@ export const useStore = create<VersaState>((set, get) => ({
   fetchAll: async (prune = false) => {
     const { repoPath, showToast } = get()
     if (!repoPath) return
+    try {
+      const remotes = await invoke<RemoteInfo[]>('list_remotes', { path: repoPath })
+      if (remotes.length === 0) {
+        showToast(tt('toast.no_remote_fetch'), 'error')
+        return
+      }
+    } catch {}
     try {
       await invoke('git_fetch', { path: repoPath, remote: null, prune })
       await get().refreshRepo()
@@ -1234,7 +1587,9 @@ export const useStore = create<VersaState>((set, get) => ({
 
   showToast: (message, type = 'success') => {
     set({ toast: { message, type } })
-    setTimeout(() => set({ toast: null }), 3500)
+    // Errors stay up longer — they're often actionable instructions the user
+    // needs time to read, copy, or switch contexts to act on.
+    setTimeout(() => set({ toast: null }), type === 'error' ? 8000 : 3500)
   },
 
   loadConflicts: async () => {
@@ -1920,6 +2275,57 @@ export const useStore = create<VersaState>((set, get) => ({
     return id
   },
 
+  openAgentTerminal: (repoPath, agent) => {
+    const id = `a${Math.random().toString(36).slice(2)}`
+    const prev = get().terminalsByRepo[repoPath] ?? []
+    // Resolve argv at open-time so later edits to the agent's config don't
+    // affect this running tab (avoids "I edited args mid-run and now things
+    // are weird"). Snapshot of unstaged paths is taken NOW so the exit
+    // handler can diff against it and figure out what the agent touched.
+    const args = agent.extraArgs.split(/\s+/).filter((s) => s.length > 0)
+    const status = get().repoStatus
+    const preUnstagedSnapshot = status
+      ? status.files.filter((f) => f.unstagedStatus).map((f) => f.path)
+      : []
+    const session: TermSession = {
+      id,
+      title: agent.name,
+      agentId: agent.id,
+      agentCommand: agent.command,
+      agentArgs: args,
+      preUnstagedSnapshot,
+    }
+    set({
+      terminalsByRepo: { ...get().terminalsByRepo, [repoPath]: [...prev, session] },
+      activeTerminalByRepo: { ...get().activeTerminalByRepo, [repoPath]: id },
+    })
+    return id
+  },
+
+  markAgentTerminalExited: (sessionId) => {
+    set((state) => {
+      const next = { ...state.terminalsByRepo }
+      for (const [repo, list] of Object.entries(state.terminalsByRepo)) {
+        if (list.some((s) => s.id === sessionId)) {
+          next[repo] = list.map((s) => (s.id === sessionId ? { ...s, exited: true } : s))
+        }
+      }
+      return { terminalsByRepo: next }
+    })
+  },
+
+  markAgentChangelist: (sessionId, changelistId) => {
+    set((state) => {
+      const next = { ...state.terminalsByRepo }
+      for (const [repo, list] of Object.entries(state.terminalsByRepo)) {
+        if (list.some((s) => s.id === sessionId)) {
+          next[repo] = list.map((s) => (s.id === sessionId ? { ...s, changelistId } : s))
+        }
+      }
+      return { terminalsByRepo: next }
+    })
+  },
+
   closeTerminal: (repoPath, sessionId) => {
     const list = get().terminalsByRepo[repoPath] ?? []
     const nextList = list.filter((s) => s.id !== sessionId)
@@ -2025,7 +2431,25 @@ export const useStore = create<VersaState>((set, get) => ({
         acc => set({ commitMessage: acc }),
         id => set({ currentAiStreamId: id }),
       )
-      set({ commitMessage: message.trim() })
+      const trimmed = message.trim()
+      if (!trimmed) {
+        // The provider returned a 200 OK but the stream produced no text —
+        // common with wrong model name, missing api-key permissions, or a
+        // content filter rejecting the prompt. Without this branch the UI
+        // would silently re-enable with an empty textarea and look like
+        // "nothing happened".
+        // eslint-disable-next-line no-console
+        console.warn('[ai_generate_commit_message] provider returned empty content', {
+          provider: aiConfig.provider,
+          model: aiConfig.model.trim() || '(default)',
+          baseUrl: aiConfig.baseUrl.trim() || '(default)',
+          diffChars: diffText.length,
+        })
+        showToast(tt('toast.ai_empty_response'), 'error')
+        set({ commitMessage: original })
+        return
+      }
+      set({ commitMessage: trimmed })
     } catch (e) {
       showToast(String(e), 'error')
       set({ commitMessage: original })

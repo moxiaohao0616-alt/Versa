@@ -7,6 +7,8 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, type TermSession } from '../../store'
+import { useAgentStore } from '../../lib/agents'
+import { promoteAgentExitToChangelist } from '../../agents/lifecycle'
 
 /** Pick the xterm palette based on the app theme.
  *  - Dark: Tokyo-Night-ish, plays well on near-black bg
@@ -100,19 +102,70 @@ export function Terminal() {
   const sessions = useStore((s) => (repoPath ? s.terminalsByRepo[repoPath] ?? [] : []))
   const activeId = useStore((s) => (repoPath ? s.activeTerminalByRepo[repoPath] ?? null : null))
   const openNewTerminal = useStore((s) => s.openNewTerminal)
+  const openAgentTerminal = useStore((s) => s.openAgentTerminal)
   const closeTerminal = useStore((s) => s.closeTerminal)
   const setActiveTerminal = useStore((s) => s.setActiveTerminal)
+  const agents = useAgentStore((s) => s.agents)
 
   const [panelHeight, setPanelHeight] = useState(280)
   const [dragging, setDragging] = useState(false)
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
+  /** Viewport-anchored position of the open menu — we render the popup with
+   *  `position: fixed` so `.terminal-panel { overflow: hidden }` can't clip
+   *  it. Recomputed every time the button is clicked. */
+  const [agentMenuPos, setAgentMenuPos] = useState<{ top: number; right: number }>({
+    top: 0,
+    right: 0,
+  })
+  const agentMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const agentMenuRef = useRef<HTMLDivElement>(null)
   const dragState = useRef<{ startY: number; startH: number } | null>(null)
+
+  // Close the agent launcher menu on any click outside it (or its trigger
+  // button). Cheaper than a headless-ui popover.
+  useEffect(() => {
+    if (!agentMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        !agentMenuRef.current?.contains(target) &&
+        !agentMenuButtonRef.current?.contains(target)
+      ) {
+        setAgentMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [agentMenuOpen])
+
+  const toggleAgentMenu = () => {
+    if (!agentMenuOpen && agentMenuButtonRef.current) {
+      const r = agentMenuButtonRef.current.getBoundingClientRect()
+      setAgentMenuPos({
+        // Pop upward: menu's bottom edge sits 6px above the button's top.
+        // CSS translates by -100% so the inline `top` value is the menu's
+        // future *bottom*.
+        top: r.top - 6,
+        right: window.innerWidth - r.right,
+      })
+    }
+    setAgentMenuOpen((v) => !v)
+  }
 
   // Auto-open the first tab when the panel comes up empty for this repo.
   // Without this, the panel renders a blank body with just "+" to click — a
   // small UX trap; the old single-terminal behavior was "open and ready".
+  //
+  // Reads via useStore.getState() instead of the destructured `sessions`
+  // because React 18 StrictMode (dev only) invokes the effect body TWICE on
+  // mount with NO re-render between the calls. The closure's `sessions`
+  // would be [] in BOTH calls even after the first call's openNewTerminal
+  // updated the store, so we'd accidentally spawn two tabs. getState reads
+  // the live store and the second call short-circuits.
   useEffect(() => {
     if (!repoPath) return
-    if (sessions.length === 0) {
+    const liveSessions = useStore.getState().terminalsByRepo[repoPath] ?? []
+    if (liveSessions.length === 0) {
       openNewTerminal(repoPath)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,29 +207,40 @@ export function Terminal() {
       <div className="term-header">
         <span className="term-dot" />
         <div className="term-tabs">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={`term-tab${s.id === activeId ? ' active' : ''}`}
-              onClick={() => setActiveTerminal(repoPath, s.id)}
-              title={s.title}
-            >
-              <span className="term-tab-label">{s.title}</span>
-              <span
-                role="button"
-                tabIndex={-1}
-                className="term-tab-close"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeTerminal(repoPath, s.id)
-                }}
-                title={t('common.close')}
+          {sessions.map((s) => {
+            const isAgent = !!s.agentId
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={`term-tab${s.id === activeId ? ' active' : ''}${isAgent ? ' term-tab-agent' : ''}`}
+                onClick={() => setActiveTerminal(repoPath, s.id)}
+                title={s.title}
               >
-                <i className="ti ti-x" />
-              </span>
-            </button>
-          ))}
+                {isAgent && <i className="ti ti-robot" style={{ fontSize: 11, marginRight: 3 }} />}
+                <span className="term-tab-label">{s.title}</span>
+                {s.exited && (
+                  <i
+                    className="ti ti-check"
+                    style={{ fontSize: 10, marginLeft: 2, opacity: 0.7 }}
+                    title={t('terminal.agent_exited')}
+                  />
+                )}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  className="term-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTerminal(repoPath, s.id)
+                  }}
+                  title={t('common.close')}
+                >
+                  <i className="ti ti-x" />
+                </span>
+              </button>
+            )
+          })}
           <button
             type="button"
             className="term-tab term-tab-new"
@@ -188,6 +252,62 @@ export function Terminal() {
         </div>
         <span className="term-path">{repoPath}</span>
         <div className="term-actions">
+          {/* Agent launcher — collapsed into one button on the far right so the
+              tab strip stays focused on actual sessions, not creation knobs.
+              Click → dropdown of every configured agent + "Configure…". The
+              menu itself is portal-free `position: fixed` so the panel's
+              overflow:hidden doesn't crop it. */}
+          <button
+            ref={agentMenuButtonRef}
+            className="term-btn"
+            onClick={toggleAgentMenu}
+            title={t('terminal.agent_launcher')}
+            aria-haspopup="menu"
+            aria-expanded={agentMenuOpen}
+          >
+            <i className="ti ti-robot" />
+            <i className="ti ti-chevron-down" style={{ fontSize: 10, marginLeft: 2 }} />
+          </button>
+          {agentMenuOpen && (
+            <div
+              ref={agentMenuRef}
+              className="term-agent-menu"
+              role="menu"
+              style={{ top: agentMenuPos.top, right: agentMenuPos.right }}
+            >
+              {agents.length === 0 ? (
+                <p className="term-agent-menu-empty">{t('terminal.agent_menu_empty')}</p>
+              ) : (
+                agents.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="term-agent-menu-item"
+                    onClick={() => {
+                      openAgentTerminal(repoPath, a)
+                      setAgentMenuOpen(false)
+                    }}
+                    title={`${a.command} ${a.extraArgs}`.trim()}
+                  >
+                    <i className="ti ti-robot" />
+                    <span>{a.name}</span>
+                  </button>
+                ))
+              )}
+              <div className="term-agent-menu-sep" />
+              <button
+                type="button"
+                className="term-agent-menu-item term-agent-menu-config"
+                onClick={() => {
+                  setAgentMenuOpen(false)
+                  window.dispatchEvent(new CustomEvent('versa:nav-agents-settings'))
+                }}
+              >
+                <i className="ti ti-settings" />
+                <span>{t('terminal.agent_menu_configure')}</span>
+              </button>
+            </div>
+          )}
           <button
             className="term-btn"
             onClick={() => setTerminalOpen(false)}
@@ -341,7 +461,24 @@ function TerminalPane({
       if (!alive) { outFn(); return }
       unOut = outFn
 
-      const exitFn = await listen<void>(`pty:exit:${session.id}`, () => {})
+      // Agent tabs fire the auto-changelist promotion when their CLI exits.
+      // Shell tabs use a no-op handler (the shell exiting just means the
+      // tab is dead until manually closed).
+      const exitFn = await listen<void>(`pty:exit:${session.id}`, () => {
+        if (session.agentId) {
+          useStore.getState().markAgentTerminalExited(session.id)
+          // Look up the freshly-updated session (with exited=true) and run
+          // the snapshot diff. Fire-and-forget — UI does not block on this.
+          const repo = useStore.getState().repoPath
+          if (repo) {
+            const updated = useStore
+              .getState()
+              .terminalsByRepo[repo]
+              ?.find((s) => s.id === session.id)
+            if (updated) void promoteAgentExitToChangelist(updated)
+          }
+        }
+      })
       if (!alive) { exitFn(); return }
       unExit = exitFn
 
@@ -354,6 +491,10 @@ function TerminalPane({
           cwd: repoPath,
           rows: term.rows,
           cols: term.cols,
+          // Agent tabs pass a custom command (the AI CLI) instead of $SHELL.
+          // Plain shell tabs send null/null and Rust falls back to $SHELL -l.
+          command: session.agentCommand ?? null,
+          args: session.agentArgs ?? null,
         })
       } catch (e) {
         term.writeln(`\x1b[31mFailed to open PTY: ${e}\x1b[0m`)
@@ -361,20 +502,18 @@ function TerminalPane({
       }
       if (!alive) return
 
-      // Nudge the shell to redraw its prompt. Handles two flaky cases at
-      // once with one universal shortcut:
-      //   (1) Re-attach — the user left this repo and came back; the PTY
-      //       is still alive but the xterm instance is brand-new and the
-      //       shell is sitting idle at a prompt nobody saw.
-      //   (2) Initial-open race — on slow machines the shell can flush
-      //       its first prompt before our listener is ready, even though
-      //       we attach listen() before pty_open above.
-      // \x0c is ctrl+L, the conventional "clear and redraw prompt"
-      // shortcut implemented by every interactive shell (zsh zle, bash
-      // readline, fish). If the shell is mid-command, ctrl+L is forwarded
-      // to the running program (vim/less/htop all treat it as "redraw"),
-      // so the worst case is a free screen refresh.
-      invoke('pty_write', { sessionId: session.id, data: '\x0c' }).catch(() => {})
+      // Nudge the shell/agent to redraw its prompt. ctrl+L is universally
+      // "clear and redraw" for interactive REPLs (zsh, bash, fish, claude,
+      // codex). Handles:
+      //   (1) Re-attach — repo switch returned to a still-alive PTY whose
+      //       last frame our fresh xterm doesn't have.
+      //   (2) Initial-open race — listener wins the race ≈always with the
+      //       fix above, but slow machines occasionally still drop the
+      //       very first byte; ctrl+L is the safety net.
+      // For an exited agent tab there's nothing to nudge — skip.
+      if (!session.exited) {
+        invoke('pty_write', { sessionId: session.id, data: '\x0c' }).catch(() => {})
+      }
 
       disposeOnData = term.onData((data) => {
         invoke('pty_write', { sessionId: session.id, data }).catch(() => {})

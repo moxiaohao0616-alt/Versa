@@ -54,12 +54,187 @@ pub struct DiffLine {
 
 #[tauri::command]
 pub fn open_repo(path: String) -> Result<RepoStatus, String> {
-    let repo = Repository::open(&path).map_err(fe)?;
+    // Try `discover` first — walks UP from `path` looking for a .git/, so
+    // a user who picked `myrepo/src/components` still lands on the repo
+    // root. Falls back to a friendlier error than libgit2's raw NotFound
+    // when even discover comes up empty.
+    let repo = match Repository::discover(&path) {
+        Ok(r) => r,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(not_a_repo_message(&path, e))
+        }
+        Err(e) => return Err(fe(e)),
+    };
+    let resolved = repo
+        .workdir()
+        .map(|p| p.to_string_lossy().into_owned())
+        // Bare repo (no working dir) — uncommon for a GUI but fall back to
+        // the user's input rather than failing.
+        .unwrap_or(path);
+    // Normalize trailing slash so tab keys dedupe consistently.
+    let resolved = resolved.trim_end_matches('/').to_string();
+
     let branch = get_current_branch(&repo);
     let files = get_changed_files(&repo)?;
     let (ahead, behind) = get_ahead_behind(&repo).unwrap_or((0, 0));
     let state = repo_state_str(&repo);
-    Ok(RepoStatus { path, branch, files, ahead, behind, state })
+    Ok(RepoStatus { path: resolved, branch, files, ahead, behind, state })
+}
+
+/// Build a human-friendly error for "not a git repo". If the picked folder
+/// contains sub-folders that ARE repos, list them so the user can redirect
+/// without guessing. This is the common "I picked the workspace parent
+/// instead of an individual project" mistake.
+fn not_a_repo_message(path: &str, original: git2::Error) -> String {
+    let mut children: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for ent in entries.flatten() {
+            let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            if ent.path().join(".git").exists() {
+                if let Some(name) = ent.file_name().to_str() {
+                    children.push(name.to_string());
+                }
+            }
+        }
+    }
+    if children.is_empty() {
+        return format!("{}", original);
+    }
+    children.sort();
+    let total = children.len();
+    let preview = children.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+    let more = if total > 5 {
+        format!(", +{} more", total - 5)
+    } else {
+        String::new()
+    };
+    format!(
+        "'{}' isn't a git repository — but it contains {} sub-repo{}: {}{}. Pick one of those.",
+        path,
+        total,
+        if total == 1 { "" } else { "s" },
+        preview,
+        more,
+    )
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SubRepoInfo {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceScan {
+    /// "single" — exactly one repo found.
+    /// "multi" — 2+ repos found (root itself counted if it's a repo).
+    /// "empty" — no repos anywhere (root not a repo, no child .git folders).
+    pub kind: String,
+    /// The folder the user picked (or, if `discover` walked up, the resolved
+    /// repo root). Workspace tab keys on this.
+    pub root: String,
+    /// Whether `root` itself is a git repository. False for an uninitialized
+    /// project folder containing vendored sub-repos (the dashboard surfaces
+    /// a "Initialize git here" affordance in this case).
+    pub root_is_repo: bool,
+    /// All repos discovered. If `root_is_repo`, root is the first entry.
+    /// Remaining entries are the immediate children of `root` whose paths
+    /// contain a `.git` directory, sorted by name.
+    pub repos: Vec<SubRepoInfo>,
+}
+
+/// Probe a user-picked path. Cheap — no full repo load, just enough to decide
+/// what kind of workspace to construct. Handles three real-world shapes:
+///   1. Plain repo: path has `.git`, no sub-repos → single
+///   2. Monorepo with vendored sub-repos: path has `.git` AND children do → multi
+///   3. Workspace parent: path is just a folder containing sub-repos → multi
+///   4. Uninitialized project with sub-repos: path has no `.git` but contains
+///      sub-repos AND project markers (package.json etc.) → multi, with
+///      `root_is_repo=false` so the dashboard can offer git-init
+#[tauri::command]
+pub fn scan_workspace(path: String) -> Result<WorkspaceScan, String> {
+    let (resolved_root, root_is_repo) = match Repository::discover(&path) {
+        Ok(repo) => {
+            let resolved = repo
+                .workdir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone());
+            (resolved.trim_end_matches('/').to_string(), true)
+        }
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            (path.trim_end_matches('/').to_string(), false)
+        }
+        Err(e) => return Err(fe(e)),
+    };
+
+    // Always scan children of the resolved root for nested `.git` directories.
+    // This catches: vendored sub-repos in a monorepo, and a non-git project
+    // folder that bundles git sub-projects.
+    let mut subs: Vec<SubRepoInfo> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&resolved_root) {
+        for ent in entries.flatten() {
+            let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            let child = ent.path();
+            if child.join(".git").exists() {
+                if let Some(name) = ent.file_name().to_str() {
+                    let p = child
+                        .to_string_lossy()
+                        .trim_end_matches('/')
+                        .to_string();
+                    subs.push(SubRepoInfo { path: p, name: name.to_string() });
+                }
+            }
+        }
+    }
+    subs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut repos: Vec<SubRepoInfo> = Vec::new();
+    if root_is_repo {
+        let name = resolved_root
+            .rsplit('/')
+            .find(|s| !s.is_empty())
+            .unwrap_or(&resolved_root)
+            .to_string();
+        repos.push(SubRepoInfo {
+            path: resolved_root.clone(),
+            name,
+        });
+    }
+    repos.extend(subs);
+
+    let kind = match repos.len() {
+        0 => "empty",
+        1 => "single",
+        _ => "multi",
+    };
+    Ok(WorkspaceScan {
+        kind: kind.into(),
+        root: resolved_root,
+        root_is_repo,
+        repos,
+    })
+}
+
+/// `git init` the given path and return its initial repo status. Used by the
+/// workspace overview's "Initialize git here" card so the user can adopt an
+/// uninitialized project folder without dropping to a terminal.
+#[tauri::command]
+pub async fn git_init_repo(path: String) -> Result<RepoStatus, String> {
+    // libgit2's init creates `.git/` with the standard layout. Default branch
+    // follows the user's `init.defaultBranch` config (or `master`); we don't
+    // hard-code one so behaviour matches what `git init` would do at the CLI.
+    Repository::init(&path).map_err(fe)?;
+    // Reuse open_repo for the status payload so the frontend gets the same
+    // shape it sees everywhere else.
+    open_repo(path)
 }
 
 #[tauri::command]
@@ -1161,8 +1336,20 @@ async fn run_git_simple(args: &[&str], cwd: &str) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
-        let err = String::from_utf8_lossy(&out.stderr);
-        Err(friendly_error(err.trim()))
+        // Concat stderr+stdout — `git commit` writes "nothing to commit" to
+        // stdout on the exit-code-1 path, so stderr alone would be empty and
+        // collapse to "未知错误". Prefer stderr first since it's where git
+        // normally surfaces failures.
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let combined = if stderr.is_empty() {
+            stdout
+        } else if stdout.is_empty() {
+            stderr
+        } else {
+            format!("{stderr}\n{stdout}")
+        };
+        Err(friendly_error(&combined))
     }
 }
 
@@ -3616,8 +3803,15 @@ fn friendly_error(msg: &str) -> String {
     if lower.contains("cannot delete branch") && lower.contains("checked out") {
         return "不能删除当前正在使用的分支。先切到别的分支再来。".to_string();
     }
-    if lower.contains("nothing to commit") {
-        return "目标改动已经在当前分支上，无需重复应用。".to_string();
+    if lower.contains("nothing to commit") || lower.contains("no changes added to commit") {
+        // Common cause when committing a folder that contains git submodules
+        // whose working trees are dirty: the parent's submodule pointer didn't
+        // change, so there's nothing for the outer commit to record. Surface
+        // that hint along with the literal git message.
+        if lower.contains("submodule") || lower.contains("subproject") || lower.contains("dirty") {
+            return "没有可提交的改动 — 子模块工作树虽然脏了，但它们指向的 commit 没变，外层仓库不会记录这种状态。\n要把子模块改动也提交，请先进入对应的子模块目录提交。".to_string();
+        }
+        return "没有可提交的改动。看到的修改可能只在子模块内部，外层仓库的索引并没变。".to_string();
     }
     if lower.contains("merge_head") && lower.contains("not found") {
         return "当前不在合并过程中。".to_string();

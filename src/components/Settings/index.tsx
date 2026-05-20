@@ -5,6 +5,7 @@ import type { AIProvider, RemoteInfo, LfsStatus, LfsPattern, LfsFile } from '../
 import { AboutModal } from '../About'
 import { CheatsheetModal } from '../Cheatsheet'
 import { CloudSettings } from '../../cloud/CloudSettings'
+import { AgentsSettings } from '../../agents/AgentsSettings'
 import i18nInstance, { setLanguage } from '../../i18n'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -72,7 +73,7 @@ const PROVIDERS: ProviderMeta[] = [
 
 const PROVIDER_MAP = new Map(PROVIDERS.map(p => [p.value, p]))
 
-type SubPage = 'main' | 'ai' | 'remotes' | 'lfs' | 'cloud'
+type SubPage = 'main' | 'ai' | 'remotes' | 'lfs' | 'cloud' | 'agents'
 
 export function Settings() {
   const [page, setPage] = useState<SubPage>('main')
@@ -80,11 +81,16 @@ export function Settings() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   // Deep-link from the SyncStatus indicator (and any other future caller):
-  // when the event fires, jump straight to the Cloud sub-page.
+  // when the event fires, jump straight to the right sub-page.
   useEffect(() => {
-    const onNav = () => setPage('cloud')
-    window.addEventListener('versa:nav-cloud-settings', onNav)
-    return () => window.removeEventListener('versa:nav-cloud-settings', onNav)
+    const toCloud = () => setPage('cloud')
+    const toAgents = () => setPage('agents')
+    window.addEventListener('versa:nav-cloud-settings', toCloud)
+    window.addEventListener('versa:nav-agents-settings', toAgents)
+    return () => {
+      window.removeEventListener('versa:nav-cloud-settings', toCloud)
+      window.removeEventListener('versa:nav-agents-settings', toAgents)
+    }
   }, [])
 
   let view
@@ -92,12 +98,14 @@ export function Settings() {
   else if (page === 'remotes') view = <RemotesSettings onBack={() => setPage('main')} />
   else if (page === 'lfs')     view = <LfsSettings onBack={() => setPage('main')} />
   else if (page === 'cloud')   view = <CloudSettings onBack={() => setPage('main')} />
+  else if (page === 'agents')  view = <AgentsSettings onBack={() => setPage('main')} />
   else view = (
     <MainSettings
       onOpenAI={() => setPage('ai')}
       onOpenRemotes={() => setPage('remotes')}
       onOpenLfs={() => setPage('lfs')}
       onOpenCloud={() => setPage('cloud')}
+      onOpenAgents={() => setPage('agents')}
       onOpenAbout={() => setAboutOpen(true)}
       onOpenShortcuts={() => setShortcutsOpen(true)}
     />
@@ -116,6 +124,7 @@ function MainSettings({
   onOpenRemotes,
   onOpenLfs,
   onOpenCloud,
+  onOpenAgents,
   onOpenAbout,
   onOpenShortcuts,
 }: {
@@ -123,6 +132,7 @@ function MainSettings({
   onOpenRemotes: () => void
   onOpenLfs: () => void
   onOpenCloud: () => void
+  onOpenAgents: () => void
   onOpenAbout: () => void
   onOpenShortcuts: () => void
 }) {
@@ -286,6 +296,19 @@ function MainSettings({
           <div className="settings-nav-text">
             <p className="settings-row-label">{t('settings.cloud')}</p>
             <p className="settings-row-desc">{t('settings.cloud_desc')}</p>
+          </div>
+          <div className="settings-nav-status">
+            <i className="ti ti-chevron-right" />
+          </div>
+        </button>
+
+        <button className="settings-nav-row" onClick={onOpenAgents} type="button">
+          <div className="settings-nav-icon">
+            <i className="ti ti-robot" />
+          </div>
+          <div className="settings-nav-text">
+            <p className="settings-row-label">{t('settings.agents')}</p>
+            <p className="settings-row-desc">{t('settings.agents_desc')}</p>
           </div>
           <div className="settings-nav-status">
             <i className="ti ti-chevron-right" />

@@ -39,6 +39,10 @@ fn fe<E: std::fmt::Display>(e: E) -> String {
 /// webview as `pty:out:<session_id>` events. Already-existing sessions
 /// with the same id are silently replaced.
 #[tauri::command]
+/// `command` = None → use `$SHELL` (default terminal-tab path);
+/// Some → spawn that binary instead (e.g. `claude`) for agent tabs.
+/// `args` = optional argv extras; ignored when `command` is None
+/// (the shell always gets its standard `-l`).
 pub fn pty_open<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, PtyRegistry>,
@@ -46,6 +50,8 @@ pub fn pty_open<R: Runtime>(
     cwd: String,
     rows: u16,
     cols: u16,
+    command: Option<String>,
+    args: Option<Vec<String>>,
 ) -> Result<(), String> {
     // Idempotent: if the frontend ever calls open twice with the same id
     // (e.g. React strict-mode double mount, or accidental retry), don't
@@ -68,13 +74,23 @@ pub fn pty_open<R: Runtime>(
         })
         .map_err(fe)?;
 
-    // Pick the user's shell; fall back to /bin/sh. `-l` so login files
-    // (zprofile / bash_profile) source — this gets the user's PATH and
-    // friends. We deliberately omit `-i` so the shell decides interactive
-    // mode based on having a TTY (which we just gave it).
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let mut cmd = CommandBuilder::new(&shell);
-    cmd.arg("-l");
+    // Choose what to run: user's $SHELL by default, or an explicit command
+    // (e.g. `claude`) for agent tabs. The shell variant always gets `-l` so
+    // login files source — important for $PATH discovery.
+    let mut cmd = if let Some(bin) = command.as_ref().filter(|c| !c.trim().is_empty()) {
+        let mut c = CommandBuilder::new(bin);
+        if let Some(extra) = args {
+            for a in extra {
+                c.arg(a);
+            }
+        }
+        c
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let mut c = CommandBuilder::new(&shell);
+        c.arg("-l");
+        c
+    };
     // Fall back to $HOME if frontend doesn't have a repo path. We don't
     // want to inherit the app bundle's cwd (which is somewhere random).
     let resolved_cwd = if cwd.trim().is_empty() {

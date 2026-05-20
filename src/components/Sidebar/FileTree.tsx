@@ -1,4 +1,9 @@
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+
+/** When the file list crosses this size, default every folder to collapsed.
+ *  Otherwise an N-thousand file fresh-`git init` like loom would render every
+ *  row on first paint and freeze the sub-repo switch. */
+const AUTO_COLLAPSE_THRESHOLD = 500
 
 // Indent applied per nesting depth. Keep small — sidebar is narrow and we
 // have file action buttons on the right that need room.
@@ -116,6 +121,7 @@ export function FileTree<T extends { path: string }>({
   onFolderDragStart,
   onFolderDragEnd,
   isFolderDraggingPath,
+  resetKey,
 }: {
   files: T[]
   renderFile: (file: T) => ReactNode
@@ -123,9 +129,26 @@ export function FileTree<T extends { path: string }>({
   onFolderDragEnd?: (e: DragEvent<HTMLDivElement>) => void
   /** Folder path currently being dragged — used to fade its row. */
   isFolderDraggingPath?: string | null
+  /** Identity for the "set of files we're viewing" — typically the repo path.
+   *  When it changes we recompute the initial collapse state, so switching
+   *  from a small repo to a huge one auto-collapses (and vice versa). Without
+   *  this, the `closed` Set carried over from the previous repo would either
+   *  hide everything in the new repo or leave a 10k-file tree fully expanded. */
+  resetKey?: string
 }) {
   const tree = useMemo(() => buildFileTree(files), [files])
-  const [closed, setClosed] = useState<Set<string>>(() => new Set())
+  const [closed, setClosed] = useState<Set<string>>(() =>
+    files.length > AUTO_COLLAPSE_THRESHOLD ? collectFolderPaths(tree) : new Set(),
+  )
+  // Reset collapse state when the underlying repo changes (sub-repo switch,
+  // workspace tab switch). File-watcher refreshes don't change `resetKey`, so
+  // a user's expansion choices survive saves and pulls.
+  const prevResetKey = useRef(resetKey)
+  useEffect(() => {
+    if (prevResetKey.current === resetKey) return
+    prevResetKey.current = resetKey
+    setClosed(files.length > AUTO_COLLAPSE_THRESHOLD ? collectFolderPaths(tree) : new Set())
+  }, [resetKey, files, tree])
 
   const toggle = (path: string) => {
     setClosed((prev) => {
@@ -255,6 +278,20 @@ function countFiles<T>(node: TreeNode<T>): number {
   let n = 0
   for (const c of node.children) n += countFiles(c)
   return n
+}
+
+/** Flatten every folder path in the tree. Used to seed the "everything
+ *  collapsed" state for huge file lists. */
+function collectFolderPaths<T>(nodes: TreeNode<T>[]): Set<string> {
+  const out = new Set<string>()
+  const walk = (n: TreeNode<T>) => {
+    if (n.kind === 'folder') {
+      out.add(n.path)
+      for (const c of n.children) walk(c)
+    }
+  }
+  for (const n of nodes) walk(n)
+  return out
 }
 
 function collectFilePaths<T extends { path: string }>(node: TreeNode<T>, out: string[]): void {

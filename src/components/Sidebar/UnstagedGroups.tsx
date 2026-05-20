@@ -14,6 +14,8 @@ interface Props {
   selectedFile: string | null
   selectedFileStaged: boolean
   treeMode: boolean
+  /** Forwarded to FileTree as its resetKey — see FileTree comment. */
+  resetKey?: string
   onSelect: (path: string) => void
   onStage: (path: string) => void
   onDiscard: (path: string) => void
@@ -32,11 +34,17 @@ interface Props {
 // system file manager / browser doesn't accidentally trip our drop handlers.
 const DRAG_MIME = 'application/x-versa-file-path'
 
+/** Past this count the flat list collapses to a notice — Sidebar already
+ *  auto-flips to tree mode above this same threshold, so this only kicks in
+ *  if the user explicitly disabled tree view AND has tons of files. */
+const FLAT_RENDER_LIMIT = 500
+
 export function UnstagedGroups({
   unstagedFiles,
   selectedFile,
   selectedFileStaged,
   treeMode,
+  resetKey,
   onSelect,
   onStage,
   onDiscard,
@@ -264,6 +272,7 @@ export function UnstagedGroups({
                   <FileTree
                     files={files}
                     renderFile={renderRow}
+                    resetKey={resetKey}
                     isFolderDraggingPath={draggingFolder}
                     onFolderDragStart={(paths, e) => {
                       // Folder drag = move every descendant file together.
@@ -280,6 +289,21 @@ export function UnstagedGroups({
                       setDropTargetId(null)
                     }}
                   />
+                ) : files.length > FLAT_RENDER_LIMIT ? (
+                  // Flat mode collapses to a notice when the list is huge —
+                  // rendering N-thousand interactive rows freezes the
+                  // sub-repo switch. The notice nudges the user toward tree
+                  // view where folding keeps it fast.
+                  <p
+                    style={{
+                      margin: '8px',
+                      fontSize: 12,
+                      color: 'var(--text-muted, #888)',
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    {t('sidebar.flat_too_many', { count: files.length })}
+                  </p>
                 ) : (
                   files.map(renderRow)
                 )
@@ -385,6 +409,19 @@ function FileRow({
   return (
     <div
       className={`file-item ${selected ? 'selected' : ''}`}
+      // WKWebView (Tauri on macOS) sometimes drops `click` events on a
+      // draggable element when the trackpad registers any micro-movement
+      // during the press — the browser preemptively starts a drag and the
+      // resulting click never fires. mousedown fires regardless, so we
+      // route file-selection through it instead. Action buttons stop
+      // propagation themselves, but `e.target.closest('button')` is the
+      // belt: a press that started inside an action button must not also
+      // change the file selection.
+      onMouseDown={(e) => {
+        if (e.button !== 0) return
+        if ((e.target as Element).closest('button')) return
+        onSelect()
+      }}
       onClick={onSelect}
       draggable
       onDragStart={onDragStart}
@@ -396,6 +433,10 @@ function FileRow({
         // dragging ghost separately.
         opacity: isDragging ? 0.4 : 1,
         cursor: 'grab',
+        // Prevent the row's text from entering a "selection drag" mode
+        // that conflicts with our HTML5 drag handling — same root cause as
+        // the click-eating quirk above.
+        userSelect: 'none',
       }}
     >
       <span className={`fbadge status-${file.unstagedStatus}`}>{file.unstagedStatus}</span>

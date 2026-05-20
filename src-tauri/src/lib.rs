@@ -51,7 +51,7 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
-            open_repo, save_progress, get_diff, get_history, get_file_history, get_block_history,
+            open_repo, scan_workspace, git_init_repo, save_progress, get_diff, get_history, get_file_history, get_block_history,
             create_branch, switch_branch, stage_file, unstage_file, discard_file,
             get_branches, run_shell, git_push, git_pull, git_clone,
             get_graph, checkout_commit, get_commit_files,

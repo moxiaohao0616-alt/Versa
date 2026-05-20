@@ -370,8 +370,6 @@ export function ConflictView() {
     })
   }, [selectedConflictFile, conflictContent])
 
-  if (!repoStatus) return null
-
   const pendingCount = conflicts.length
   const allFilesResolved = pendingCount === 0
 
@@ -426,6 +424,11 @@ export function ConflictView() {
     // flag this but be explicit so layout edits don't accidentally drop a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentHunk, showPreview, merged.ranges])
+
+  // Bail late so the useMemo/useEffect hooks above always run — sub-repo
+  // switching transiently nulls repoStatus, and an early return before those
+  // hooks would flip React's hook count across renders.
+  if (!repoStatus) return null
   const allHunksDecided =
     !!conflictContent &&
     choices.length === conflictContent.hunks.length &&

@@ -15,6 +15,8 @@ import { CompareView } from './components/Compare'
 import { GraphView } from './components/Graph'
 import { ConflictView } from './components/Conflict'
 import { TabStrip } from './components/TabStrip'
+import { SubRepoStrip } from './components/SubRepoStrip'
+import { WorkspaceOverview } from './components/WorkspaceOverview'
 import { BisectBanner } from './components/Bisect'
 import { RightSidebar } from './components/RightSidebar'
 import { BranchSwitcher } from './components/BranchSwitcher'
@@ -26,7 +28,7 @@ import './styles/app.css'
 
 export default function App() {
   const { t } = useTranslation()
-  const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, toggleRightSidebar } = useStore()
+  const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, toggleRightSidebar, tabs, setWorkspaceView } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -92,14 +94,15 @@ export default function App() {
           return
         }
       }
-      // ⌘⇧] / ⌘⇧[ — next / previous tab
+      // ⌘⇧] / ⌘⇧[ — next / previous workspace tab
       if (e.shiftKey && (e.key === ']' || e.key === '[' || e.key === '}' || e.key === '{')) {
         if (s.tabs.length < 2 || !s.repoPath) return
         e.preventDefault()
-        const idx = s.tabs.findIndex(t => t.path === s.repoPath)
+        const idx = s.tabs.findIndex(t => t.repos?.some(r => r.path === s.repoPath))
+        if (idx < 0) return
         const dir = (e.key === ']' || e.key === '}') ? 1 : -1
         const next = s.tabs[(idx + dir + s.tabs.length) % s.tabs.length]
-        s.switchTab(next.path)
+        s.switchTab(next.root)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -119,7 +122,10 @@ export default function App() {
           handleOpenRepo()
           break
         case 'close_tab':
-          if (s.repoPath) s.closeTab(s.repoPath)
+          if (s.repoPath) {
+            const ws = s.tabs.find(t => t.repos?.some(r => r.path === s.repoPath))
+            if (ws) s.closeTab(ws.root)
+          }
           break
         case 'open_settings':
           setSettingsOpen(true)
@@ -148,10 +154,11 @@ export default function App() {
         case 'next_tab':
         case 'prev_tab': {
           if (s.tabs.length < 2 || !s.repoPath) return
-          const idx = s.tabs.findIndex(tab => tab.path === s.repoPath)
+          const idx = s.tabs.findIndex(tab => tab.repos?.some(r => r.path === s.repoPath))
+          if (idx < 0) break
           const dir = id === 'next_tab' ? 1 : -1
           const next = s.tabs[(idx + dir + s.tabs.length) % s.tabs.length]
-          s.switchTab(next.path)
+          s.switchTab(next.root)
           break
         }
         case 'check_updates':
@@ -169,7 +176,11 @@ export default function App() {
   useEffect(() => {
     const onNav = () => setSettingsOpen(true)
     window.addEventListener('versa:nav-cloud-settings', onNav)
-    return () => window.removeEventListener('versa:nav-cloud-settings', onNav)
+    window.addEventListener('versa:nav-agents-settings', onNav)
+    return () => {
+      window.removeEventListener('versa:nav-cloud-settings', onNav)
+      window.removeEventListener('versa:nav-agents-settings', onNav)
+    }
   }, [])
 
   // Streaming progress from git push/pull/clone (one frame per stderr line)
@@ -324,8 +335,11 @@ export default function App() {
         <SyncStatus />
       </div>
 
-      <UpdateBanner />
-      <TabStrip />
+      <div className="app-header">
+        <UpdateBanner />
+        <TabStrip />
+        <SubRepoStrip />
+      </div>
 
       {!repoPath ? (
         <WelcomeScreen onOpen={handleOpenRepo} />
@@ -334,7 +348,24 @@ export default function App() {
           <div className="body-wrap">
           {repoStatus?.state === 'bisecting' && <BisectBanner />}
           {(() => {
+            // Workspace overview mode — active when the current workspace tab
+            // is in dashboard view. Takes over the entire body below icon-bar
+            // (no Sidebar / Diff, no right panel).
+            const activeWs = tabs.find(w => w.repos?.some(r => r.path === repoPath))
+            const inWorkspaceOverview = !!activeWs
+              && activeWs.view === 'overview'
+              && (activeWs.repos?.length ?? 0) > 1
+            // Icon-bar tabs target a focused sub-repo, so clicking any of them
+            // while in overview implicitly flips the workspace back to 'repo'
+            // view on its activeRepo.
+            const leaveOverview = () => {
+              if (inWorkspaceOverview && activeWs) {
+                setWorkspaceView(activeWs.root, 'repo')
+              }
+            }
+
             const inNormalView = !settingsOpen
+              && !inWorkspaceOverview
               && repoStatus?.state !== 'merging'
               && repoStatus?.state !== 'rebasing'
               && repoStatus?.state !== 'reverting'
@@ -346,10 +377,10 @@ export default function App() {
             return (
           <div className={`app-body ${rsVisible ? 'has-right' : ''}`}>
             <nav className="icon-bar">
-              <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => setSettingsOpen(false)} />
-              <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => setSettingsOpen(false)} />
-              <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => setSettingsOpen(false)} />
-              <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} onClick={() => setSettingsOpen(false)} />
+              <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <div className="spacer" />
               {inNormalView && (
                 <button
@@ -363,7 +394,14 @@ export default function App() {
               )}
               <button
                 className={`icon-btn ${terminalOpen ? 'active' : ''}`}
-                onClick={() => useStore.getState().setTerminalOpen(!terminalOpen)}
+                onClick={() => {
+                  // Close Settings if it's the current main area — consistent
+                  // with the four tab icons above which also close it. Any
+                  // left-bar interaction should bring the user back to the
+                  // working view.
+                  setSettingsOpen(false)
+                  useStore.getState().setTerminalOpen(!terminalOpen)
+                }}
                 title="Terminal (⌘`)"
                 aria-label={t('cheatsheet.toggle_terminal')}
               >
@@ -382,6 +420,10 @@ export default function App() {
             {settingsOpen ? (
               <main className="main-area settings-full">
                 <Settings />
+              </main>
+            ) : inWorkspaceOverview ? (
+              <main className="main-area settings-full">
+                <WorkspaceOverview />
               </main>
             ) : (() => {
               // Conflict resolution takes over ONLY the 'changes' tab. The
