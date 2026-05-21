@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { useStore, diffsToUnifiedText, type DiffResult } from '../../store'
+import { useStore, diffsToUnifiedText, AI_MAX_FILES, type DiffResult } from '../../store'
 import { filterToActiveByFileKey, getActivePathspec } from '../../lib/changelists'
 import { renderLiteMarkdown } from '../../lib/lite-markdown'
 
@@ -39,6 +39,15 @@ export function AIReviewModal({ onClose }: { onClose: () => void }) {
       const activeFiles = activePathspec === null
         ? repoStatus.files
         : repoStatus.files.filter(f => activePathspec.includes(f.path))
+      // Same hard cap as `generateCommitMessage` — see store/index.ts.
+      if (activeFiles.length > AI_MAX_FILES) {
+        showToast(
+          t('toast.ai_too_many_files', { count: activeFiles.length, cap: AI_MAX_FILES }),
+          'error',
+        )
+        onClose()
+        return
+      }
       const hasStaged = activeFiles.some(f => f.stagedStatus)
       let diffText = ''
       try {

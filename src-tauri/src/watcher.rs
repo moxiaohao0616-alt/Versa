@@ -64,6 +64,20 @@ fn is_ignored_path(p: &Path) -> bool {
         || s.contains("/.git/logs/")
         || s.contains("/.git/info/")
         || s.contains("/.git/lfs/")
+        // CRITICAL: every `git status` (and especially `git status` with
+        // submodules) refreshes the index's stat cache and rewrites
+        // `.git/index`. Without this filter, our own refresh writes the
+        // index → watcher fires "repo:changed" → triggers another
+        // refreshRepo → write index again → infinite loop. Same story
+        // for `.git/index.lock` (briefly created during the write) and
+        // FETCH_HEAD / packed-refs / ORIG_HEAD which git/libgit2 may
+        // touch during read-only-looking operations.
+        || s.contains("/.git/index")
+        || s.contains("/.git/HEAD")
+        || s.contains("/.git/FETCH_HEAD")
+        || s.contains("/.git/ORIG_HEAD")
+        || s.contains("/.git/packed-refs")
+        || s.contains("/.git/modules/") // submodule git-dirs — same issue, nested
         || s.contains("/node_modules/")
         || s.contains("/target/")
         || s.contains("/.next/")

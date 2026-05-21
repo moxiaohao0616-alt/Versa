@@ -578,10 +578,29 @@ function SubmodulesSection({ filter }: { filter: string }) {
   const [newPath, setNewPath] = useState('')
   const [removeTarget, setRemoveTarget] = useState<SubmoduleInfo | null>(null)
 
+  // True while we have names but the full per-submodule dirty status is
+  // still being fetched. Lets the badge show "checking…" instead of
+  // claiming "未初始化" (status_bits=0 falls into the `notInit` branch
+  // because IN_WD isn't set yet).
+  const [statusPending, setStatusPending] = useState(false)
   const refresh = async () => {
     setLoading(true)
-    try { setSubs(await listSubmodules()) }
-    finally { setLoading(false) }
+    setStatusPending(false)
+    try {
+      // Two-step: render names + URLs instantly, then fill in dirty status.
+      // The full call recurses into every submodule's working tree which on
+      // loom-sized monorepos (midscene = 120k files) sums to seconds.
+      const quick = await listSubmodules({ skipStatus: true })
+      setSubs(quick)
+      setLoading(false)
+      setStatusPending(true)
+      const full = await listSubmodules()
+      setSubs(full)
+    } catch {
+      setLoading(false)
+    } finally {
+      setStatusPending(false)
+    }
   }
   useEffect(() => { refresh() }, [repoPath])
 
@@ -645,7 +664,9 @@ function SubmodulesSection({ filter }: { filter: string }) {
       ) : (
         <div className="branches-list">
           {filtered.map(s => {
-            const badge = submoduleStatusBadge(s, t)
+            const badge = statusPending
+              ? { label: t('branches.submodule_status_checking'), tone: 'info' as const }
+              : submoduleStatusBadge(s, t)
             return (
               <div key={s.name} className="branch-row" title={s.url}>
                 <i className="ti ti-package branch-icon" />

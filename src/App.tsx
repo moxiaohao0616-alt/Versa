@@ -29,6 +29,14 @@ import './styles/app.css'
 export default function App() {
   const { t } = useTranslation()
   const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, toggleRightSidebar, tabs, setWorkspaceView } = useStore()
+  // The hairline progress bar lights up whenever anything async is in
+  // flight for the current repo: a cold-path switch, the regular file
+  // list load (step 2), or the per-submodule dirty scan (step 3).
+  const busy = useStore(s => {
+    if (s.loading) return true
+    if (!s.repoPath) return false
+    return !!s.filesLoadPending[s.repoPath] || !!s.submoduleCheckPending[s.repoPath]
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -338,6 +346,12 @@ export default function App() {
       <div className="app-header">
         <UpdateBanner />
         <TabStrip />
+        {/* 1px hairline between parent tabs and sub-repo strip. Lights up
+            whenever a tab / sub-repo switch is in flight — sits exactly at
+            the boundary the user is interacting with, so the visual
+            feedback shows up at the source of the click. Always rendered
+            so the slot doesn't shift the layout when it activates. */}
+        <div className={`tab-switch-bar ${busy ? 'active' : ''}`} />
         <SubRepoStrip />
       </div>
 

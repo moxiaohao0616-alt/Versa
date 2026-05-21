@@ -270,6 +270,17 @@ export function UnstagedGroups({
                 )
                 return treeMode ? (
                   <FileTree
+                    // Remount on repo switch — and on "size class" transitions
+                    // within the same repo — so the auto-collapse state is
+                    // computed from the new files on the FIRST render.
+                    //
+                    // Without the size class in the key, the snapshot-blank
+                    // path (empty files → fresh open_repo brings in N-thousand)
+                    // would keep the FileTree instance: its `closed` Set stays
+                    // empty (set when files=[]) and the first render explodes
+                    // into N-thousand expanded rows before useEffect catches
+                    // up. The user sees that frozen frame as "卡".
+                    key={`${resetKey ?? g.id}-${files.length > 500 ? 'large' : 'small'}`}
                     files={files}
                     renderFile={renderRow}
                     resetKey={resetKey}

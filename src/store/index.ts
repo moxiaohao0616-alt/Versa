@@ -76,6 +76,8 @@ export interface ChangedFile {
   path: string
   stagedStatus: 'M' | 'A' | 'D' | 'R' | null
   unstagedStatus: 'M' | 'A' | 'D' | 'R' | 'C' | '?' | null
+  /** True if this entry is a git submodule rather than a regular file. */
+  isSubmodule?: boolean
 }
 
 export type RepoState =
@@ -373,6 +375,13 @@ export interface AIConfig {
   baseUrl: string     // only meaningful for 'openai-compatible'
 }
 
+/** Hard cap on how many changed files AI commands will operate on. Past
+ *  this, diff payloads either time out libgit2's enumeration, blow past
+ *  the model's context window, or both — and burn tokens for a request
+ *  that's guaranteed to fail. We refuse early and ask the user to narrow
+ *  scope with a changelist. */
+export const AI_MAX_FILES = 200
+
 const DEFAULT_AI_CONFIG: AIConfig = {
   provider: 'anthropic',
   apiKey: '',
@@ -456,6 +465,97 @@ const blankSnapshot = (): RepoSnapshot => ({
   graphLimit: 200,
   graphSelected: null,
 })
+
+/** Three-step repo load:
+ *  1. Quick header (branch, ahead/behind) — typically <10ms.
+ *  2. Regular files, submodules excluded — fast even on parents like loom
+ *     with 8 submodules totalling 100k+ files. Submodule entries omitted.
+ *  3. Dirty-submodule entries — each submodule runs its own status pass
+ *     so this can take seconds on big submodules (midscene at 120k files).
+ *     Streamed in async; merged on top of step 2's file list.
+ *
+ *  Calls `setRepoStatus` up to three times. The caller is responsible for
+ *  ignoring the file-list sets if the user has navigated away. */
+async function loadRepoStatusInTwoSteps(
+  path: string,
+  setRepoStatus: (status: RepoStatus) => void,
+): Promise<RepoStatus> {
+  const t0 = performance.now()
+  const quick = await invoke<RepoStatus>('open_repo', { path, skipFiles: true })
+  console.log(`[load] step1 quick header: ${(performance.now() - t0).toFixed(1)}ms — ${path}`)
+  setRepoStatus(quick)
+  // Mark step-2 as in flight so the Sidebar can show "loading files…"
+  // while the empty snapshot is still showing. Done in a microtask
+  // (before the async IIFE returns) so the flag is observable on the
+  // same tick as the `setRepoStatus(quick)` above.
+  useStore.setState(s => ({
+    filesLoadPending: { ...s.filesLoadPending, [path]: true },
+  }))
+  // Regular files (no submodule recursion) — fast. Then dirty submodules
+  // separately — slow, fires in parallel but doesn't block step 2.
+  void (async () => {
+    try {
+      const t1 = performance.now()
+      const files = await invoke<ChangedFile[]>('get_changed_files_only', {
+        path,
+        skipSubmoduleDirty: true,
+      })
+      console.log(`[load] step2 files (no submodules): ${(performance.now() - t1).toFixed(1)}ms — ${files.length} entries`)
+      setRepoStatus({ ...quick, files })
+      // Step 2 done — file list is now authoritative (except for
+      // submodule dirty entries which arrive in step 3).
+      useStore.setState(s => {
+        const next = { ...s.filesLoadPending }
+        delete next[path]
+        return { filesLoadPending: next }
+      })
+      // Step 3: per-submodule dirty checks IN PARALLEL. Each one is a
+      // separate Rust task → bounded by max(sub_time), not sum.
+      try {
+        const t2 = performance.now()
+        const names = await invoke<string[]>('list_submodule_names', { path })
+        if (names.length === 0) return
+        // Mark "submodule check in progress" so Sidebar can render the
+        // "checking submodules…" banner. Use functional setState so we
+        // don't race with concurrent updates from other repos.
+        useStore.setState(s => ({
+          submoduleCheckPending: { ...s.submoduleCheckPending, [path]: true },
+        }))
+        try {
+          const results = await Promise.all(
+            names.map(name =>
+              invoke<ChangedFile | null>('check_submodule_dirty', { path, name })
+                .catch(() => null)
+            ),
+          )
+          const subDirty = results.filter((f): f is ChangedFile => f !== null)
+          console.log(`[load] step3 ${names.length} submodules in parallel: ${(performance.now() - t2).toFixed(1)}ms — ${subDirty.length} dirty`)
+          if (subDirty.length > 0) {
+            setRepoStatus({ ...quick, files: [...files, ...subDirty] })
+          }
+        } finally {
+          useStore.setState(s => {
+            const next = { ...s.submoduleCheckPending }
+            delete next[path]
+            return { submoduleCheckPending: next }
+          })
+        }
+      } catch { /* non-fatal */ }
+    } catch {
+      // Step-2 failure leaves the user with just the quick header.
+    } finally {
+      // Clear the files-load flag even on failure so the banner doesn't
+      // get stuck forever if step 2 throws.
+      useStore.setState(s => {
+        if (!s.filesLoadPending[path]) return s
+        const next = { ...s.filesLoadPending }
+        delete next[path]
+        return { filesLoadPending: next }
+      })
+    }
+  })()
+  return quick
+}
 
 /** Find the workspace tab that contains `repoPath` as one of its sub-repos. */
 function findWorkspaceFor(tabs: WorkspaceTab[], repoPath: string | null): WorkspaceTab | null {
@@ -612,6 +712,16 @@ interface VersaState {
   diffSideBySide: boolean  // render the diff as two columns instead of unified
   fileTreeView: boolean    // render staged/unstaged lists as a folder tree
 
+  // Repos whose step-2 (regular file list) load is in flight. Sidebar
+  // shows a "loading files…" banner so the empty interval before data
+  // arrives doesn't look like an inert "clean working tree" state.
+  filesLoadPending: Record<string, boolean>
+
+  // Repos whose step-3 submodule dirty check is currently in flight.
+  // Keyed by repo path. Sidebar reads this to render a "checking submodules…"
+  // banner so the user knows why the file list is briefly incomplete.
+  submoduleCheckPending: Record<string, boolean>
+
   // Command queued for the embedded Terminal to pick up and run. Cleared by
   // the Terminal once consumed.
   pendingTerminalCommand: string | null
@@ -665,7 +775,7 @@ interface VersaState {
   // Blame
   blameFile: (file: string, commit?: string) => Promise<BlameLine[]>
   // Submodules
-  listSubmodules: () => Promise<SubmoduleInfo[]>
+  listSubmodules: (opts?: { skipStatus?: boolean }) => Promise<SubmoduleInfo[]>
   addSubmodule: (url: string, subPath: string) => Promise<void>
   initSubmodule: (name: string) => Promise<void>
   updateSubmodule: (name: string) => Promise<void>
@@ -795,6 +905,8 @@ export const useStore = create<VersaState>((set, get) => ({
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
   diffSideBySide: localStorage.getItem('versa:diffSideBySide') === '1',
   fileTreeView: localStorage.getItem('versa:fileTreeView') === '1',
+  filesLoadPending: {},
+  submoduleCheckPending: {},
   bisectStatus: null,
   currentAiStreamId: null,
   diff: [],
@@ -891,16 +1003,34 @@ export const useStore = create<VersaState>((set, get) => ({
       const updatedRecents = [entry, ...prevRecents.filter(r => r.path !== scan.root)].slice(0, 10)
       localStorage.setItem('versa:recentRepos', JSON.stringify(updatedRecents))
 
-      // For SINGLE workspaces we still block on `open_repo(activeRepo)` so the
-      // Sidebar/Diff has data the moment it mounts — single-repo UX needs that
-      // synchronous landing. For MULTI workspaces we drop the blocking await
-      // entirely: the dashboard handles per-card loading states, and on large
-      // monorepos like loom (where each `open_repo` does a full libgit2 status
-      // including node_modules), waiting on N parallel calls before painting
-      // anything is the dominant cause of perceived lag.
+      // For SINGLE workspaces we still block on the QUICK open_repo so the
+      // Sidebar header (branch, ahead/behind) renders immediately. The file
+      // list streams in afterwards via get_changed_files_only — shaves the
+      // big libgit2 status pass off the critical path.
       let initialStatus: RepoStatus | null = null
       if (!isMulti) {
-        initialStatus = await invoke<RepoStatus>('open_repo', { path: activeRepo })
+        initialStatus = await invoke<RepoStatus>('open_repo', { path: activeRepo, skipFiles: true })
+        // Background-fetch the file list (no submodule recursion) followed
+        // by an async second pass for dirty submodules.
+        void (async () => {
+          try {
+            const files = await invoke<ChangedFile[]>('get_changed_files_only', {
+              path: activeRepo,
+              skipSubmoduleDirty: true,
+            })
+            const s = get()
+            if (s.repoPath === activeRepo && s.repoStatus) {
+              set({ repoStatus: { ...s.repoStatus, files } })
+            }
+            const subDirty = await invoke<ChangedFile[]>('get_dirty_submodule_files', { path: activeRepo })
+            if (subDirty.length > 0) {
+              const s2 = get()
+              if (s2.repoPath === activeRepo && s2.repoStatus) {
+                set({ repoStatus: { ...s2.repoStatus, files: [...files, ...subDirty] } })
+              }
+            }
+          } catch {}
+        })()
       }
 
       set({
@@ -916,29 +1046,27 @@ export const useStore = create<VersaState>((set, get) => ({
       get().loadProject()
 
       // For MULTI: lazily populate per-sub-repo status AFTER the first paint.
-      // We don't await — the dashboard renders immediately with "loading"
-      // cards, then each one updates as its status lands. Functional `set`
-      // guards against races where the user closed the tab mid-load.
+      // Two-step per repo: quick header (branch, ahead/behind) lands fast so
+      // cards show real info within tens of ms; file list streams in later
+      // so the dashboard isn't blocked behind a 100k-file libgit2 status pass.
       if (isMulti) {
+        const applyStatus = (path: string, st: RepoStatus) => {
+          set(s => {
+            if (!s.tabs.some(t => t.root === scan.root)) return s
+            const next: Record<string, RepoSnapshot> = {
+              ...s.tabSnapshots,
+              [path]: { ...(s.tabSnapshots[path] ?? blankSnapshot()), repoStatus: st },
+            }
+            if (s.repoPath === path) {
+              return { tabSnapshots: next, repoStatus: st }
+            }
+            return { tabSnapshots: next }
+          })
+        }
         for (const r of scan.repos) {
           void (async () => {
             try {
-              const st = await invoke<RepoStatus>('open_repo', { path: r.path })
-              set(s => {
-                // Tab may have closed (workspace gone) — drop the result.
-                if (!s.tabs.some(t => t.root === scan.root)) return s
-                const next: Record<string, RepoSnapshot> = {
-                  ...s.tabSnapshots,
-                  [r.path]: { ...(s.tabSnapshots[r.path] ?? blankSnapshot()), repoStatus: st },
-                }
-                // If this is the currently-focused sub-repo, also reflect
-                // into the live `repoStatus` slot so Sidebar/Diff (when the
-                // user clicks through into repo view) sees fresh data.
-                if (s.repoPath === r.path) {
-                  return { tabSnapshots: next, repoStatus: st }
-                }
-                return { tabSnapshots: next }
-              })
+              await loadRepoStatusInTwoSteps(r.path, (st) => applyStatus(r.path, st))
             } catch {
               // Per-repo failures stay silent — card just shows "couldn't load".
             }
@@ -967,31 +1095,41 @@ export const useStore = create<VersaState>((set, get) => ({
     if (!ws) return
     if (state.repoPath === ws.activeRepo) return
 
-    // Stash whatever sub-repo we're leaving, then restore the workspace's
-    // last-active sub-repo's snapshot.
     const stashed = state.repoPath
       ? { ...state.tabSnapshots, [state.repoPath]: snapshotFrom(state) }
       : state.tabSnapshots
     const targetSnap = stashed[ws.activeRepo] ?? blankSnapshot()
-
     const prevPath = state.repoPath
+    const hadSnapshot = !!targetSnap.repoStatus
     set({
       tabSnapshots: stashed,
       repoPath: ws.activeRepo,
       ...targetSnap,
+      loading: !hadSnapshot,
     })
     swapWatcher(prevPath, ws.activeRepo)
 
+    if (hadSnapshot) {
+      get().loadProject()
+      void loadRepoStatusInTwoSteps(ws.activeRepo, (status) => {
+        if (get().repoPath === ws.activeRepo) set({ repoStatus: status })
+      }).catch(() => {})
+      return
+    }
+
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path: ws.activeRepo })
-      set({ repoStatus: status })
+      await loadRepoStatusInTwoSteps(ws.activeRepo, (status) => {
+        if (get().repoPath !== ws.activeRepo) return
+        set({ repoStatus: status, loading: false })
+      })
       get().loadProject()
     } catch (e) {
-      set({ error: String(e) })
+      set({ error: String(e), loading: false })
     }
   },
 
   switchSubRepo: async (repoPath: string) => {
+    const t0 = performance.now()
     const state = get()
     const ws = findWorkspaceFor(state.tabs, repoPath)
     if (!ws) return
@@ -1000,33 +1138,53 @@ export const useStore = create<VersaState>((set, get) => ({
     // mode, just flip the view (no snapshot work needed).
     if (state.repoPath === repoPath && ws.view === 'repo') return
 
+    console.log(`[switchSubRepo] → ${repoPath}`)
+
+    // Build the new state synchronously and apply it in one shot. The
+    // snapshot-fast-path is genuinely instant (≈ 5ms total per profiling),
+    // so the previous "show loading for at least 300ms" guarantee was the
+    // dominant source of perceived lag — it forced every click to wait
+    // 300ms even when there was nothing to wait for.
     const stashed = state.repoPath
       ? { ...state.tabSnapshots, [state.repoPath]: snapshotFrom(state) }
       : state.tabSnapshots
     const targetSnap = stashed[repoPath] ?? blankSnapshot()
-
-    // Remember which sub-repo this workspace was focused on so switchTab can
-    // restore it later. Flip the view to 'repo' so the main area renders
-    // Sidebar+Diff (not the dashboard).
     const tabs: WorkspaceTab[] = state.tabs.map(t =>
       t.root === ws.root ? { ...t, activeRepo: repoPath, view: 'repo' as const } : t,
     )
-
     const prevPath = state.repoPath
+    const hadSnapshot = !!targetSnap.repoStatus
     set({
       tabs,
       tabSnapshots: stashed,
       repoPath,
       ...targetSnap,
+      // Loading bar only lights up while we're really waiting on data —
+      // the cold path. Fast-path snapshot hits clear it instantly.
+      loading: !hadSnapshot,
     })
     swapWatcher(prevPath, repoPath)
+    console.log(`[switchSubRepo] sync set + swapWatcher done: ${(performance.now() - t0).toFixed(1)}ms (hadSnapshot=${hadSnapshot}, snapshotFiles=${targetSnap.repoStatus?.files.length ?? 0})`)
 
+    if (hadSnapshot) {
+      // Fast path: snapshot already has data. Refresh in the background
+      // via two-step load so files (esp. dirty submodules) repopulate.
+      get().loadProject()
+      void loadRepoStatusInTwoSteps(repoPath, (status) => {
+        if (get().repoPath === repoPath) set({ repoStatus: status })
+      }).catch(() => {})
+      return
+    }
+
+    // Cold path: two-step load — quick header first, file list streams.
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path: repoPath })
-      set({ repoStatus: status })
+      await loadRepoStatusInTwoSteps(repoPath, (status) => {
+        if (get().repoPath !== repoPath) return
+        set({ repoStatus: status, loading: false })
+      })
       get().loadProject()
     } catch (e) {
-      set({ error: String(e) })
+      set({ error: String(e), loading: false })
     }
   },
 
@@ -1110,8 +1268,10 @@ export const useStore = create<VersaState>((set, get) => ({
     })
     swapWatcher(prevPath, nextWs.activeRepo)
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path: nextWs.activeRepo })
-      set({ repoStatus: status })
+      await loadRepoStatusInTwoSteps(nextWs.activeRepo, (status) => {
+        if (get().repoPath !== nextWs.activeRepo) return
+        set({ repoStatus: status })
+      })
       get().loadProject()
     } catch (e) {
       set({ error: String(e) })
@@ -1122,8 +1282,16 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     try {
-      const status = await invoke<RepoStatus>('open_repo', { path: repoPath })
-      set({ repoStatus: status })
+      // Use the same two-step pattern as switch — shell git for the file
+      // list (no submodule recursion), then per-submodule dirty checks.
+      // The previous full `open_repo` here re-introduced the slow libgit2
+      // status pass AND silently dropped `isSubmodule` flags, which
+      // overwrote correctly-flagged data set by `loadRepoStatusInTwoSteps`
+      // moments earlier and broke auto-select.
+      await loadRepoStatusInTwoSteps(repoPath, (status) => {
+        if (get().repoPath !== repoPath) return
+        set({ repoStatus: status })
+      })
       // Stashes — cheap to enumerate, keep badge fresh on each refresh.
       try {
         const stashes = await invoke<StashEntry[]>('list_stashes', { path: repoPath })
@@ -1148,6 +1316,8 @@ export const useStore = create<VersaState>((set, get) => ({
     const { repoPath, diffIgnoreWhitespace } = get()
     if (!repoPath) return
     const myGen = ++diffLoadGen
+    const t0 = performance.now()
+    console.log(`[selectFile] → ${path} (staged=${staged})`)
     set({ selectedFile: path, selectedFileStaged: staged, loading: true, activeTab: 'changes' })
     try {
       const diff = await invoke<DiffResult[]>('get_diff', {
@@ -1157,8 +1327,14 @@ export const useStore = create<VersaState>((set, get) => ({
         commitId: commitId ?? null,
         ignoreWhitespace: diffIgnoreWhitespace,
       })
+      const tDiff = performance.now() - t0
       // Drop stale results: a newer selectFile / viewAllInCommit superseded us.
-      if (myGen !== diffLoadGen) return
+      if (myGen !== diffLoadGen) {
+        console.log(`[selectFile] DROPPED stale result for ${path} after ${tDiff.toFixed(1)}ms`)
+        return
+      }
+      const lineCount = diff.reduce((n, d) => n + d.hunks.reduce((m, h) => m + h.lines.length, 0), 0)
+      console.log(`[selectFile] get_diff ${tDiff.toFixed(1)}ms — ${diff.length} files, ${lineCount} lines`)
       set({ diff, loading: false })
     } catch (e) {
       if (myGen !== diffLoadGen) return
@@ -1484,10 +1660,13 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   // ── Submodules ───────────────────────────────────────────────────────
-  listSubmodules: async () => {
+  listSubmodules: async (opts?: { skipStatus?: boolean }) => {
     const { repoPath } = get()
     if (!repoPath) return []
-    return await invoke<SubmoduleInfo[]>('list_submodules', { path: repoPath })
+    return await invoke<SubmoduleInfo[]>('list_submodules', {
+      path: repoPath,
+      skipStatus: opts?.skipStatus ?? false,
+    })
   },
   addSubmodule: async (url, subPath) => {
     const { repoPath, showToast } = get()
@@ -2395,6 +2574,20 @@ export const useStore = create<VersaState>((set, get) => ({
       activePathspec === null
         ? repoStatus.files
         : repoStatus.files.filter((f) => activePathspec.includes(f.path))
+
+    // Hard cap on file count. The diff payload + AI context cost scale
+    // linearly with file count; 44k-file requests will either time out
+    // libgit2, blow past the model's context window, or both — and burn
+    // tokens for a guaranteed failure on the way. Refuse early and tell
+    // the user to narrow scope with a changelist (the AI honors active
+    // changelist filtering already, so this is the right escape hatch).
+    if (activeFiles.length > AI_MAX_FILES) {
+      showToast(
+        tt('toast.ai_too_many_files', { count: activeFiles.length, cap: AI_MAX_FILES }),
+        'error',
+      )
+      return
+    }
 
     // Prefer the staged diff; if nothing in the active group is staged, fall
     // back to the unstaged working-tree diff (this is what "保存进度" would

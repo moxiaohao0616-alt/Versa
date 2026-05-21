@@ -20,6 +20,12 @@ pub struct ChangedFile {
     pub path: String,
     pub staged_status: Option<String>,
     pub unstaged_status: Option<String>,
+    /// True when this entry represents a git submodule rather than a
+    /// plain file. Used by the frontend to skip submodule entries during
+    /// auto-select (their diffs run a full status pass inside the
+    /// submodule's working tree — hundreds of ms on a 100k-file repo).
+    #[serde(default)]
+    pub is_submodule: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -53,7 +59,7 @@ pub struct DiffLine {
 }
 
 #[tauri::command]
-pub fn open_repo(path: String) -> Result<RepoStatus, String> {
+pub fn open_repo(path: String, skip_files: Option<bool>) -> Result<RepoStatus, String> {
     // Try `discover` first — walks UP from `path` looking for a .git/, so
     // a user who picked `myrepo/src/components` still lands on the repo
     // root. Falls back to a friendlier error than libgit2's raw NotFound
@@ -75,10 +81,233 @@ pub fn open_repo(path: String) -> Result<RepoStatus, String> {
     let resolved = resolved.trim_end_matches('/').to_string();
 
     let branch = get_current_branch(&repo);
-    let files = get_changed_files(&repo)?;
+    // `skip_files=true` is the fast path used when only branch/ahead/behind
+    // metadata is needed up front (e.g. the moment a tab/sub-repo is opened).
+    // On a monorepo with submodules and ~100k working-tree files, the status
+    // enumeration alone can take hundreds of milliseconds; the file list is
+    // then fetched separately via `get_changed_files` so the UI can paint
+    // the header instantly and stream the list in.
+    let files = if skip_files.unwrap_or(false) {
+        Vec::new()
+    } else {
+        get_changed_files(&repo)?
+    };
     let (ahead, behind) = get_ahead_behind(&repo).unwrap_or((0, 0));
     let state = repo_state_str(&repo);
     Ok(RepoStatus { path: resolved, branch, files, ahead, behind, state })
+}
+
+/// Just the changed-files list for an already-known repo path. Pairs with
+/// `open_repo { skip_files: true }` to split the expensive status pass off
+/// the critical path of opening a tab.
+///
+/// `skip_submodule_dirty=true` makes libgit2's status pass use
+/// `SubmoduleIgnore::Dirty` — only HEAD-pointer comparison, no recursion
+/// into each submodule's working tree. On loom-sized parent repos (8
+/// submodules incl. midscene at 120k files) this is the difference
+/// between ~200ms and ~20ms. The omitted "submodule WT dirty" entries
+/// are reported separately via `get_dirty_submodule_files`.
+#[tauri::command]
+pub async fn get_changed_files_only(
+    path: String,
+    skip_submodule_dirty: Option<bool>,
+) -> Result<Vec<ChangedFile>, String> {
+    // Benchmark on loom (8 submodules, ~100k working-tree files):
+    //   libgit2 `repo.statuses({exclude_submodules:true})`:  ~900ms
+    //   shell  `git status --ignore-submodules=all`:         ~100ms
+    // libgit2 still touches each submodule's working tree even with
+    // EXCLUDE_SUBMODULES set — shell git's `--ignore-submodules=all`
+    // skips that cleanly. The `--porcelain=v1 -z` output is trivial to
+    // parse and avoids quoting headaches. Falls back to libgit2 if the
+    // shell git invocation errors for any reason.
+    if skip_submodule_dirty.unwrap_or(false) {
+        if let Ok(files) = git_status_via_shell(&path).await {
+            return Ok(files)
+        }
+    }
+    // Fallback / non-skip path: full libgit2 pass.
+    let repo = Repository::open(&path).map_err(fe)?;
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    if skip_submodule_dirty.unwrap_or(false) {
+        opts.exclude_submodules(true);
+    }
+    let statuses = repo.statuses(Some(&mut opts)).map_err(fe)?;
+    let files = statuses.iter().map(map_status_entry).collect();
+    Ok(files)
+}
+
+/// Parse `git status --porcelain=v1 -z --ignore-submodules=all` into
+/// our `ChangedFile` shape. `-z` uses NUL terminators so file names
+/// with spaces / quotes / non-ASCII bytes pass through verbatim.
+async fn git_status_via_shell(cwd: &str) -> Result<Vec<ChangedFile>, String> {
+    let out = tokio::process::Command::new("git")
+        // `--no-optional-locks` prevents git from refreshing the stat
+        // cache (which rewrites `.git/index`) on a read-only-looking
+        // status call. Without it, our own status call triggers the
+        // watcher → triggers another status call → infinite loop on
+        // any repo we're actively watching.
+        .args([
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--ignore-submodules=all",
+            "--untracked-files=normal",
+        ])
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(fe)?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let mut files = Vec::new();
+    // Porcelain v1 -z entries: XY<space>PATH\0 where XY is two status
+    // characters (X=index, Y=worktree). Renames split into two NUL-
+    // separated paths but our model only tracks the destination, so we
+    // skip the source segment when X or Y == 'R'.
+    let bytes = &out.stdout;
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 > bytes.len() { break; }
+        let x = bytes[i] as char;
+        let y = bytes[i + 1] as char;
+        // bytes[i + 2] is the separator space
+        i += 3;
+        let start = i;
+        while i < bytes.len() && bytes[i] != 0 { i += 1; }
+        let path_bytes = &bytes[start..i];
+        i += 1; // skip NUL
+        // Rename: consume the old-path segment too.
+        if x == 'R' || y == 'R' {
+            while i < bytes.len() && bytes[i] != 0 { i += 1; }
+            i += 1;
+        }
+        let path_str = String::from_utf8_lossy(path_bytes).to_string();
+        let staged_status = match x {
+            'M' => Some("M".to_string()),
+            'A' => Some("A".to_string()),
+            'D' => Some("D".to_string()),
+            'R' => Some("R".to_string()),
+            _   => None,
+        };
+        let unstaged_status = match y {
+            'M' => Some("M".to_string()),
+            'D' => Some("D".to_string()),
+            'R' => Some("R".to_string()),
+            'U' => Some("C".to_string()),
+            '?' => Some("?".to_string()),
+            _   => None,
+        };
+        if staged_status.is_some() || unstaged_status.is_some() {
+            files.push(ChangedFile {
+                path: path_str,
+                staged_status,
+                unstaged_status,
+                is_submodule: false,
+            });
+        }
+    }
+    Ok(files)
+}
+
+/// Per-submodule dirty-WT check. Returns ChangedFile entries for submodules
+/// whose working tree has uncommitted changes. Run AFTER the fast
+/// `get_changed_files_only` call so the parent repo's UI doesn't block on
+/// these inherently expensive checks (each one runs a full `git status`
+/// inside the submodule).
+#[tauri::command]
+pub fn get_dirty_submodule_files(path: String) -> Result<Vec<ChangedFile>, String> {
+    let repo = Repository::open(&path).map_err(fe)?;
+    let subs = repo.submodules().map_err(fe)?;
+    let mut out = Vec::new();
+    for sub in subs.iter() {
+        let Some(name) = sub.name() else { continue };
+        let status = repo
+            .submodule_status(name, git2::SubmoduleIgnore::None)
+            .unwrap_or(git2::SubmoduleStatus::empty());
+        let dirty = status.intersects(
+            git2::SubmoduleStatus::WD_WD_MODIFIED
+                | git2::SubmoduleStatus::WD_INDEX_MODIFIED
+                | git2::SubmoduleStatus::WD_UNTRACKED
+                | git2::SubmoduleStatus::WD_MODIFIED,
+        );
+        if dirty {
+            out.push(ChangedFile {
+                path: sub.path().to_string_lossy().into_owned(),
+                staged_status: None,
+                unstaged_status: Some("M".to_string()),
+                is_submodule: true,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// List the submodule names in a repo. Used by the frontend to fan out
+/// per-submodule dirty checks in parallel — each one runs as a separate
+/// Tokio task so total time is bounded by the slowest single check
+/// instead of the sum of all of them.
+#[tauri::command]
+pub fn list_submodule_names(path: String) -> Result<Vec<String>, String> {
+    let repo = Repository::open(&path).map_err(fe)?;
+    let subs = repo.submodules().map_err(fe)?;
+    let names = subs
+        .iter()
+        .filter_map(|s| s.name().map(|n| n.to_string()))
+        .collect();
+    Ok(names)
+}
+
+/// Check a single submodule's dirty status. Returns Some(ChangedFile) if
+/// the submodule's working tree has uncommitted changes, None otherwise.
+/// Designed to be invoked N times in parallel from JS to avoid the
+/// sequential bottleneck in `get_dirty_submodule_files`.
+#[tauri::command]
+pub fn check_submodule_dirty(path: String, name: String) -> Result<Option<ChangedFile>, String> {
+    let repo = Repository::open(&path).map_err(fe)?;
+    let status = repo
+        .submodule_status(&name, git2::SubmoduleIgnore::None)
+        .unwrap_or(git2::SubmoduleStatus::empty());
+    let dirty = status.intersects(
+        git2::SubmoduleStatus::WD_WD_MODIFIED
+            | git2::SubmoduleStatus::WD_INDEX_MODIFIED
+            | git2::SubmoduleStatus::WD_UNTRACKED
+            | git2::SubmoduleStatus::WD_MODIFIED,
+    );
+    if !dirty {
+        return Ok(None);
+    }
+    let sub = repo.find_submodule(&name).map_err(fe)?;
+    Ok(Some(ChangedFile {
+        path: sub.path().to_string_lossy().into_owned(),
+        staged_status: None,
+        unstaged_status: Some("M".to_string()),
+        is_submodule: true,
+    }))
+}
+
+/// Shared mapper used by status iterators.
+fn map_status_entry(entry: git2::StatusEntry<'_>) -> ChangedFile {
+    let s = entry.status();
+    let staged_status = if s.is_index_new() { Some("A".to_string()) }
+        else if s.is_index_modified() { Some("M".to_string()) }
+        else if s.is_index_deleted() { Some("D".to_string()) }
+        else if s.is_index_renamed() { Some("R".to_string()) }
+        else { None };
+    let unstaged_status = if s.is_wt_new() { Some("?".to_string()) }
+        else if s.is_wt_modified() { Some("M".to_string()) }
+        else if s.is_wt_deleted() { Some("D".to_string()) }
+        else if s.is_wt_renamed() { Some("R".to_string()) }
+        else if s.is_conflicted() { Some("C".to_string()) }
+        else { None };
+    ChangedFile {
+        path: entry.path().unwrap_or("").to_string(),
+        staged_status,
+        unstaged_status,
+        is_submodule: false,
+    }
 }
 
 /// Build a human-friendly error for "not a git repo". If the picked folder
@@ -234,7 +463,7 @@ pub async fn git_init_repo(path: String) -> Result<RepoStatus, String> {
     Repository::init(&path).map_err(fe)?;
     // Reuse open_repo for the status payload so the frontend gets the same
     // shape it sees everywhere else.
-    open_repo(path)
+    open_repo(path, None)
 }
 
 #[tauri::command]
@@ -3892,6 +4121,7 @@ fn get_changed_files(repo: &Repository) -> Result<Vec<ChangedFile>, String> {
             path: entry.path().unwrap_or("").to_string(),
             staged_status,
             unstaged_status,
+            is_submodule: false,
         }
     }).collect();
     Ok(files)
@@ -4547,10 +4777,11 @@ pub struct SubmoduleInfo {
 }
 
 #[tauri::command]
-pub fn list_submodules(path: String) -> Result<Vec<SubmoduleInfo>, String> {
+pub fn list_submodules(path: String, skip_status: Option<bool>) -> Result<Vec<SubmoduleInfo>, String> {
     let repo = Repository::open(&path).map_err(fe)?;
     let subs = repo.submodules().map_err(fe)?;
     let mut out = Vec::new();
+    let skip = skip_status.unwrap_or(false);
     for sub in subs.iter() {
         let name = sub.name().unwrap_or("").to_string();
         let path_str = sub.path().to_string_lossy().to_string();
@@ -4558,8 +4789,17 @@ pub fn list_submodules(path: String) -> Result<Vec<SubmoduleInfo>, String> {
         let head_oid = sub.head_id().map(|o| o.to_string());
         let branch = sub.branch().map(|s| s.to_string());
 
-        let status = repo.submodule_status(&name, git2::SubmoduleIgnore::None)
-            .unwrap_or(git2::SubmoduleStatus::empty());
+        // `skip_status=true` is the fast path: just the registration info
+        // (name, url, branch, head). Each per-submodule `submodule_status`
+        // call walks the submodule's working tree to detect dirty state —
+        // for loom that's 8 submodules × up to 120k files = >500ms. The
+        // UI calls quick first, then refreshes with full status.
+        let status = if skip {
+            git2::SubmoduleStatus::empty()
+        } else {
+            repo.submodule_status(&name, git2::SubmoduleIgnore::None)
+                .unwrap_or(git2::SubmoduleStatus::empty())
+        };
         let bits = status.bits();
         let in_workdir = status.contains(git2::SubmoduleStatus::IN_WD);
         let initialized = status.contains(git2::SubmoduleStatus::IN_CONFIG)

@@ -27,6 +27,14 @@ export function Sidebar() {
     viewAllInCommit,
     fileTreeView,
   } = useStore()
+  // Subscribed separately so we only re-render when this specific repo's
+  // pending flag flips, not on every unrelated change.
+  const submoduleCheckPending = useStore(
+    s => !!(s.repoPath && s.submoduleCheckPending[s.repoPath]),
+  )
+  const filesLoadPending = useStore(
+    s => !!(s.repoPath && s.filesLoadPending[s.repoPath]),
+  )
 
   const [stashOpen, setStashOpen] = useState(false)
   const [reflogOpen, setReflogOpen] = useState(false)
@@ -44,26 +52,83 @@ export function Sidebar() {
   const { activeId, assignments, groups } = useChangelistStore()
 
   // Auto-pick a file to show as soon as the repo (or tab) loads so the right
-  // pane isn't blank on first arrival. Prefer the first unstaged file (the
-  // common "still being worked on" case); fall back to staged. Skip when:
-  //   - the user is viewing a historical commit (selectedCommit set),
-  //   - or they already have something selected.
+  // pane isn't blank on first arrival. Prefer the first unstaged file.
+  //
+  // CRITICAL: skip entries that look like directories (path ends in "/") OR
+  // are submodule pointers. libgit2's `get_diff` for an untracked DIR with
+  // `recurse_untracked_dirs + show_untracked_content` enabled enumerates
+  // every file inside AND reads its content — for loom's `apps/` (~330
+  // files, 158 MB) this blocks the main thread for seconds and is the
+  // root cause of the "switch to loom is laggy" report.
   useEffect(() => {
     if (!repoStatus) return
     if (selectedFile || selectedCommit) return
-    const firstUnstaged = repoStatus.files.find(f => f.unstagedStatus)
+    // Belt-and-suspenders submodule detection:
+    //   1. The `isSubmodule` flag from Rust (preferred).
+    //   2. The workspace's known sub-repo paths as a fallback in case the
+    //      flag didn't make it across the IPC boundary or the snapshot is
+    //      stale from before the field existed.
+    //   3. Path ends in "/" — untracked directory, `get_diff` on it would
+    //      descend and read every file inside.
+    const allTabs = useStore.getState().tabs
+    const activeWs = allTabs.find(t => t.repos?.some(r => r.path === repoPath))
+    const submodulePaths = new Set<string>()
+    if (activeWs && repoPath) {
+      // Sub-repos under this repo's path become relative-path submodules.
+      // e.g. /loom/midscene becomes "midscene" inside loom.
+      for (const r of activeWs.repos) {
+        if (r.path === repoPath) continue
+        if (r.path.startsWith(repoPath + '/')) {
+          submodulePaths.add(r.path.slice(repoPath.length + 1))
+        }
+      }
+    }
+    const isPickable = (f: ChangedFile) =>
+      !f.path.endsWith('/') &&
+      !f.isSubmodule &&
+      !submodulePaths.has(f.path)
+    const firstUnstaged = repoStatus.files.find(
+      (f) => f.unstagedStatus && isPickable(f),
+    )
+    // Diagnostic: dump the actual `isSubmodule` field of each file so we
+    // can tell whether Tauri is propagating it from Rust correctly.
+    console.log(
+      `[autoSelect] repo=${repoPath} files=${repoStatus.files.length} ` +
+      `pickedUnstaged=${firstUnstaged?.path ?? 'NONE'} ` +
+      `wsSubs=[${[...submodulePaths].join(',')}] ` +
+      `raw=${JSON.stringify(repoStatus.files.map(f => ({ p: f.path, sub: f.isSubmodule })))}`,
+    )
     if (firstUnstaged) {
       selectFile(firstUnstaged.path, false)
       return
     }
-    const firstStaged = repoStatus.files.find(f => f.stagedStatus)
+    const firstStaged = repoStatus.files.find(
+      (f) => f.stagedStatus && isPickable(f),
+    )
     if (firstStaged) selectFile(firstStaged.path, true)
     // Re-run only on actual repo / file-set change. Including selectedFile in
     // deps would cause an immediate re-fire after we set it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, repoStatus?.files.length])
 
-  if (!repoStatus) return null
+  // While a sub-repo's `open_repo` is still in flight (the dashboard's
+  // eager load can take several seconds on a freshly-init'd monorepo where
+  // every file is untracked), `repoStatus` is null. Returning null leaves
+  // the panel blank, which reads as "clicking did nothing". Show an
+  // explicit loading state instead so the user knows the click registered.
+  if (!repoStatus) {
+    if (!repoPath) return null
+    return (
+      <aside className="sidebar">
+        <div className="empty-state center" style={{ paddingTop: 32 }}>
+          <div className="versa-spinner" />
+          <p style={{ marginTop: 12, fontSize: 12, opacity: 0.6 }}>
+            {t('sidebar.loading_repo')}
+          </p>
+        </div>
+      </aside>
+    )
+  }
 
   const { files, ahead, behind } = repoStatus
   const stagedFiles = files.filter(f => f.stagedStatus)
@@ -149,6 +214,8 @@ export function Sidebar() {
         )}
       </div>
 
+      <div className="sidebar-body">
+
       {/* ── 提交查看模式 ── */}
       {selectedCommit ? (
         <>
@@ -230,13 +297,17 @@ export function Sidebar() {
       ) : (
         /* ── 正常工作区模式 ── */
         <>
-          {files.length === 0 ? (
-            <div className="empty-state center">
+          {/* No in-sidebar banner — visual feedback is provided by the
+              hairline progress bar between TabStrip and SubRepoStrip,
+              driven globally by `loading` + `filesLoadPending` +
+              `submoduleCheckPending` in App.tsx. */}
+          {files.length === 0 && !submoduleCheckPending && !filesLoadPending ? (
+            <div className="empty-state center" style={{ flex: 1 }}>
               <i className="ti ti-circle-check" style={{ fontSize: 36, opacity: 0.15 }} />
               <p>{t('sidebar.workspace_clean')}</p>
               <span style={{ fontSize: 12 }}>{t('sidebar.workspace_clean_sub')}</span>
             </div>
-          ) : (
+          ) : files.length === 0 ? <div style={{ flex: 1 }} /> : (
             <>
               {stagedFiles.length > 0 && (() => {
                 // Inline renderer reused for both flat .map and tree mode.
@@ -268,7 +339,7 @@ export function Sidebar() {
                     <div className="section-label">{t('sidebar.staged')} · {stagedFiles.length} {t('common.files_word')}</div>
                     <div className="file-list">
                       {effectiveTreeView
-                        ? <FileTree files={stagedFiles} renderFile={renderStagedRow} resetKey={repoPath ?? ''} />
+                        ? <FileTree key={`staged-${repoPath ?? ''}-${stagedFiles.length > 500 ? 'large' : 'small'}`} files={stagedFiles} renderFile={renderStagedRow} resetKey={repoPath ?? ''} />
                         : stagedFiles.map(renderStagedRow)}
                     </div>
                   </>
@@ -285,8 +356,18 @@ export function Sidebar() {
                 onStage={stageFile}
                 onDiscard={(p) => setDiscardTarget(p)}
               />
+            </>
+          )}
+        </>
+      )}
 
-              <div className="commit-area">
+      </div>
+
+      {/* Commit area — always rendered, even when the working tree is
+          clean. Lets users type a message ahead of making changes and
+          keeps the layout stable across file-list size jumps. The
+          button itself is disabled when there's nothing to commit. */}
+      <div className="commit-area">
                 <div className="commit-label-row">
                   <span className="label">{t('sidebar.commit_label')}</span>
                   <div className="ai-btn-group">
@@ -365,11 +446,7 @@ export function Sidebar() {
                   <i className="ti ti-device-floppy" />
                   {t('sidebar.save_progress')}
                 </button>
-              </div>
-            </>
-          )}
-        </>
-      )}
+      </div>
 
       {discardTarget && (
         <div className="modal-overlay" onClick={() => setDiscardTarget(null)}>
