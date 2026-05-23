@@ -11,7 +11,7 @@ interface Props {
 
 export function WelcomeScreen({ onOpen }: Props) {
   const { t } = useTranslation()
-  const { recentRepos, openRepo, cloneRepo, showToast, gitProgress } = useStore()
+  const { openRepo, cloneRepo, showToast, gitProgress } = useStore()
   const [cloneOpen, setCloneOpen] = useState(false)
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
@@ -90,25 +90,54 @@ export function WelcomeScreen({ onOpen }: Props) {
 
         <p className="welcome-hint">{t('welcome.drop_hint')}</p>
 
-        {recentRepos.length > 0 && (
-          <div className="recent-repos">
-            <p className="recent-label">{t('welcome.recent')}</p>
-            {recentRepos.map(repo => (
-              <button
-                key={repo.path}
-                className="recent-item"
-                onClick={() => openRepo(repo.path)}
-                title={repo.path}
-              >
-                <i className="ti ti-folder" />
-                <span className="recent-info">
-                  <span className="recent-name">{repo.name}</span>
-                  <span className="recent-path">{repo.path}</span>
-                </span>
-              </button>
-            ))}
+        {/* Discovery aids. Recent repos live in the left RepoListSidebar
+            now; this is for keyboard shortcuts + feature pointers so the
+            welcome screen still earns its space. */}
+        <div className="welcome-info">
+          <div className="welcome-info-section">
+            <div className="welcome-info-title">{t('welcome.shortcuts_title')}</div>
+            <div className="welcome-info-rows">
+              <div className="welcome-info-row">
+                <kbd>⌘P</kbd>
+                <span>{t('welcome.shortcut_palette')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <kbd>⌘`</kbd>
+                <span>{t('welcome.shortcut_terminal')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <kbd>⌘⇧]</kbd>
+                <span>{t('welcome.shortcut_next_repo')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <kbd>?</kbd>
+                <span>{t('welcome.shortcut_help')}</span>
+              </div>
+            </div>
           </div>
-        )}
+
+          <div className="welcome-info-section">
+            <div className="welcome-info-title">{t('welcome.features_title')}</div>
+            <div className="welcome-info-rows">
+              <div className="welcome-info-row">
+                <i className="ti ti-layout-dashboard" />
+                <span>{t('welcome.feature_workspace')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <i className="ti ti-sparkles" />
+                <span>{t('welcome.feature_ai')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <i className="ti ti-stack-2" />
+                <span>{t('welcome.feature_changelist')}</span>
+              </div>
+              <div className="welcome-info-row">
+                <i className="ti ti-terminal-2" />
+                <span>{t('welcome.feature_terminal')}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

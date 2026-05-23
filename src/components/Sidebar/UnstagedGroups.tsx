@@ -450,7 +450,11 @@ function FileRow({
         userSelect: 'none',
       }}
     >
-      <span className={`fbadge status-${file.unstagedStatus}`}>{file.unstagedStatus}</span>
+      {file.unstagedStatus === '?' ? (
+        <span className="fbadge status-untracked" title={t('sidebar.untracked')}>N</span>
+      ) : (
+        <span className={`fbadge status-${file.unstagedStatus}`}>{file.unstagedStatus}</span>
+      )}
       <div className="file-info">
         <span className="file-name">{file.path.split('/').pop()}</span>
         {!hidePath && (

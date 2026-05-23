@@ -23,31 +23,98 @@ const tt = (k: string, opts?: Record<string, unknown>) => i18n.t(k, opts) as str
  *  `setStreamId` lets the caller publish the active stream id to the store so
  *  the UI can drive `cancelCurrentAI`. Cleared in `finally` regardless of how
  *  the call ended (success, error, cancellation). */
+/** Streaming AI invoker with two layered timeouts:
+ *  - Overall cap (default 3 min) — kills runaway requests outright.
+ *  - Idle cap (default 60 s) — fires if no delta has arrived in that
+ *    window, so a provider that holds the connection open without
+ *    sending anything still bails out instead of spinning forever.
+ *  On either trip we cancel the Rust-side stream and throw with a
+ *  user-readable message. */
 async function withAIStream(
   cmd: string,
   args: Record<string, unknown>,
   onDelta: (accumulated: string) => void,
   setStreamId?: (id: string | null) => void,
+  opts: { overallMs?: number; idleMs?: number } = {},
 ): Promise<string> {
+  const overallMs = opts.overallMs ?? 180_000
+  const idleMs = opts.idleMs ?? 60_000
+
   const streamId = crypto.randomUUID()
+  const startedAt = Date.now()
   let acc = ''
-  const unlisten = await listen<{ delta?: string; done?: boolean; cancelled?: boolean }>(
+  let lastActivityAt = Date.now()
+  let deltaCount = 0
+  let heartbeatCount = 0
+  console.log(`[AI] ${cmd} START streamId=${streamId.slice(0,8)}`)
+  const unlisten = await listen<{
+    delta?: string; heartbeat?: boolean; done?: boolean; cancelled?: boolean;
+    stage?: string; url?: string; provider?: string; status?: number; elapsedMs?: number;
+  }>(
     `ai:stream:${streamId}`,
     evt => {
       const p = evt.payload
+      const elapsed = Date.now() - startedAt
+      if (p.stage) {
+        lastActivityAt = Date.now()
+        console.log(`[AI] ${cmd} STAGE=${p.stage} @ ${elapsed}ms ${p.status ? `status=${p.status} ` : ''}${p.url ?? ''}`)
+      }
+      if (p.heartbeat) {
+        heartbeatCount++
+        lastActivityAt = Date.now()
+        if (heartbeatCount <= 3 || heartbeatCount % 10 === 0) {
+          console.log(`[AI] ${cmd} heartbeat #${heartbeatCount} @ ${elapsed}ms`)
+        }
+      }
       if (typeof p.delta === 'string') {
+        deltaCount++
+        lastActivityAt = Date.now()
+        if (deltaCount === 1) {
+          console.log(`[AI] ${cmd} FIRST DELTA @ ${elapsed}ms — len=${p.delta.length}`)
+        }
         acc += p.delta
         onDelta(acc)
+      }
+      if (p.done) {
+        lastActivityAt = Date.now()
+        console.log(`[AI] ${cmd} DONE @ ${elapsed}ms — heartbeats=${heartbeatCount} deltas=${deltaCount} totalLen=${acc.length}`)
       }
     }
   )
   setStreamId?.(streamId)
+
+  const cancel = () => {
+    invoke('cancel_ai_stream', { streamId }).catch(() => {})
+  }
+  let tickHandle: number | null = null
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    tickHandle = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt
+      const idle = Date.now() - lastActivityAt
+      if (elapsed > overallMs) {
+        if (tickHandle !== null) window.clearInterval(tickHandle)
+        cancel()
+        const why = `AI request exceeded ${Math.round(overallMs / 1000)}s overall (heartbeats=${heartbeatCount}, deltas=${deltaCount})`
+        console.log(`[AI] TIMEOUT: ${why}`)
+        reject(new Error(why))
+      } else if (idle > idleMs) {
+        if (tickHandle !== null) window.clearInterval(tickHandle)
+        cancel()
+        const why = `AI silent for ${Math.round(idleMs / 1000)}s (heartbeats=${heartbeatCount}, deltas=${deltaCount}, elapsed=${Math.round(elapsed/1000)}s) — provider may be blocking, network blocked, or stream buffered`
+        console.log(`[AI] IDLE TIMEOUT: ${why}`)
+        reject(new Error(why))
+      }
+    }, 1000)
+  })
+
   try {
-    const full = await invoke<string>(cmd, { ...args, streamId })
-    // Backend's return value is the canonical full text; prefer it over our
-    // accumulator in case any deltas were missed.
+    const full = await Promise.race([
+      invoke<string>(cmd, { ...args, streamId }),
+      timeoutPromise,
+    ])
     return full
   } finally {
+    if (tickHandle !== null) window.clearInterval(tickHandle)
     unlisten()
     setStreamId?.(null)
   }
@@ -382,6 +449,12 @@ export interface AIConfig {
  *  scope with a changelist. */
 export const AI_MAX_FILES = 200
 
+/** Hard cap on commit size. A freshly-init'd repo with no .gitignore will
+ *  otherwise try to add every file in the working tree (incl. node_modules,
+ *  build outputs, etc.) — `git add -A` runs for minutes AND pollutes the
+ *  history with junk. We bail early and tell the user to set up .gitignore. */
+export const COMMIT_MAX_FILES = 1000
+
 const DEFAULT_AI_CONFIG: AIConfig = {
   provider: 'anthropic',
   apiKey: '',
@@ -557,10 +630,15 @@ async function loadRepoStatusInTwoSteps(
   return quick
 }
 
-/** Find the workspace tab that contains `repoPath` as one of its sub-repos. */
+/** Find the workspace tab that contains `repoPath` as one of its sub-repos
+ *  — OR whose `root` equals `repoPath`, which is the empty-workspace case
+ *  where the tab has no git repos yet and we use the picked folder path
+ *  itself as the activeRepo placeholder. */
 function findWorkspaceFor(tabs: WorkspaceTab[], repoPath: string | null): WorkspaceTab | null {
   if (!repoPath) return null
-  return tabs.find(t => t.repos.some(r => r.path === repoPath)) ?? null
+  return tabs.find(t =>
+    t.root === repoPath || t.repos.some(r => r.path === repoPath),
+  ) ?? null
 }
 
 /** Find the workspace tab by its root path (the path the user picked). */
@@ -712,6 +790,12 @@ interface VersaState {
   diffSideBySide: boolean  // render the diff as two columns instead of unified
   fileTreeView: boolean    // render staged/unstaged lists as a folder tree
 
+  /** Workspace roots the user has starred — sorted to the top of the
+   *  left repo list. Persisted to localStorage. */
+  starredRepos: string[]
+  /** Whether the left repo list is collapsed to icon-only mode. */
+  repoListCollapsed: boolean
+
   // Repos whose step-2 (regular file list) load is in flight. Sidebar
   // shows a "loading files…" banner so the empty interval before data
   // arrives doesn't look like an inert "clean working tree" state.
@@ -825,6 +909,8 @@ interface VersaState {
   setDiffWordLevel: (on: boolean) => void
   setDiffSideBySide: (on: boolean) => void
   setFileTreeView: (on: boolean) => void
+  toggleStarredRepo: (workspaceRoot: string) => void
+  setRepoListCollapsed: (collapsed: boolean) => void
   /** Auto-expand graphLimit until `sha` is in the loaded window. Returns idx, or -1. */
   locateCommit: (sha: string) => Promise<number>
   loadBisectStatus: () => Promise<void>
@@ -905,6 +991,11 @@ export const useStore = create<VersaState>((set, get) => ({
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
   diffSideBySide: localStorage.getItem('versa:diffSideBySide') === '1',
   fileTreeView: localStorage.getItem('versa:fileTreeView') === '1',
+  starredRepos: (() => {
+    try { return JSON.parse(localStorage.getItem('versa:starredRepos') || '[]') }
+    catch { return [] }
+  })(),
+  repoListCollapsed: localStorage.getItem('versa:repoListCollapsed') === '1',
   filesLoadPending: {},
   submoduleCheckPending: {},
   bisectStatus: null,
@@ -949,9 +1040,11 @@ export const useStore = create<VersaState>((set, get) => ({
     try {
       const scan = await invoke<WorkspaceScan>('scan_workspace', { path })
 
-      if (scan.kind === 'empty') {
-        throw new Error(`'${path}' isn't a git repository and contains no sub-repos.`)
-      }
+      // 'empty' is no longer an error — the user might be opening a brand-
+      // new project folder that isn't yet a git repo, and the workspace
+      // dashboard's "Initialize git here" card is the next step. We open
+      // the folder as a workspace with no repos; clicking Init flips it
+      // into a proper repo in place.
 
       // After scan, re-check dedup against the canonical path(s) — `discover`
       // may have walked up for the single case.
@@ -965,6 +1058,7 @@ export const useStore = create<VersaState>((set, get) => ({
           return
         }
       } else {
+        // multi OR empty — dedupe by workspace root path.
         const existing = findWorkspaceByRoot(get().tabs, scan.root)
         if (existing) {
           set({ loading: false })
@@ -976,18 +1070,25 @@ export const useStore = create<VersaState>((set, get) => ({
       const wsName = scan.kind === 'single'
         ? scan.repos[0].name
         : (scan.root.split('/').filter(Boolean).pop() ?? scan.root)
-      const activeRepo = scan.repos[0].path
       const isMulti = scan.kind === 'multi'
+      const isEmpty = scan.kind === 'empty'
+      // For empty workspaces we have no real repo to activate — use the
+      // workspace root path as a placeholder so the tab is uniquely
+      // identifiable and the watcher can attach to *something*. The UI
+      // gates on `repos.length === 0` to render the init card instead of
+      // trying to open this path as a git repo.
+      const activeRepo = scan.repos[0]?.path ?? scan.root
       const newWorkspace: WorkspaceTab = {
         root: scan.root,
         name: wsName,
         repos: scan.repos,
         activeRepo,
         rootIsRepo: scan.rootIsRepo,
-        // Multi-repo workspaces open to the dashboard so the user lands on
-        // a "what's in this workspace" view rather than being dropped into
-        // an arbitrary sub-repo without context.
-        view: isMulti ? 'overview' : 'repo',
+        // Both multi-repo and empty workspaces open to the dashboard.
+        // - multi: "what's in this workspace"
+        // - empty: just the "Initialize git here" prompt
+        // Single-repo workspaces still drop straight into Sidebar+Diff.
+        view: isMulti || isEmpty ? 'overview' : 'repo',
       }
 
       // Stash current tab's per-sub-repo state before swapping
@@ -1007,8 +1108,10 @@ export const useStore = create<VersaState>((set, get) => ({
       // Sidebar header (branch, ahead/behind) renders immediately. The file
       // list streams in afterwards via get_changed_files_only — shaves the
       // big libgit2 status pass off the critical path.
+      // Empty workspaces have no repo to open — repoStatus stays null and
+      // the dashboard's init card prompts the user to git-init.
       let initialStatus: RepoStatus | null = null
-      if (!isMulti) {
+      if (!isMulti && !isEmpty) {
         initialStatus = await invoke<RepoStatus>('open_repo', { path: activeRepo, skipFiles: true })
         // Background-fetch the file list (no submodule recursion) followed
         // by an async second pass for dirty submodules.
@@ -1043,7 +1146,11 @@ export const useStore = create<VersaState>((set, get) => ({
         loading: false,
       })
       swapWatcher(prevPath, activeRepo)
-      get().loadProject()
+      // Skip project-detect for the empty case — `activeRepo` isn't a real
+      // path here (it's the workspace root placeholder) and `detect_project`
+      // would just be a wasted stat() of a non-git folder. loadProject runs
+      // again after `initWorkspaceRoot` for the freshly-init'd repo.
+      if (!isEmpty) get().loadProject()
 
       // For MULTI: lazily populate per-sub-repo status AFTER the first paint.
       // Two-step per repo: quick header (branch, ahead/behind) lands fast so
@@ -1077,6 +1184,11 @@ export const useStore = create<VersaState>((set, get) => ({
       if (isMulti) {
         get().showToast(
           `Opened ${scan.repos.length} sub-repos from ${wsName}`,
+          'success',
+        )
+      } else if (isEmpty) {
+        get().showToast(
+          `${wsName} isn't yet a git repository — use "Initialize git here" to start tracking it.`,
           'success',
         )
       } else if (activeRepo !== path) {
@@ -1209,15 +1321,34 @@ export const useStore = create<VersaState>((set, get) => ({
       // Seed a snapshot for the freshly-initialised root so the dashboard
       // card shows live status without a separate fetch.
       const seededSnap: RepoSnapshot = { ...blankSnapshot(), repoStatus: status }
+      // If the workspace had no repos before (the "empty folder" case),
+      // flip the view from 'overview' to 'repo' so the user lands in
+      // Sidebar+Diff right after init. For multi-workspace inits (loom
+      // adding itself alongside sub-repos), keep the dashboard.
+      const wasEmpty = ws.repos.length === 0
       set(s => ({
         tabs: s.tabs.map(t =>
           t.root === root
-            ? { ...t, repos: updatedRepos, rootIsRepo: true }
+            ? {
+                ...t,
+                repos: updatedRepos,
+                rootIsRepo: true,
+                view: wasEmpty ? 'repo' as const : t.view,
+                activeRepo: wasEmpty ? root : t.activeRepo,
+              }
             : t,
         ),
         tabSnapshots: { ...s.tabSnapshots, [root]: seededSnap },
+        // For wasEmpty, repoPath already === root (placeholder), but
+        // repoStatus was null. Plug in the freshly-loaded status so the
+        // Sidebar can render immediately.
+        ...(wasEmpty ? { repoStatus: status } : {}),
       }))
-      get().showToast(`Initialized empty git repo at ${rootName}`, 'success')
+      if (wasEmpty) get().loadProject()
+      get().showToast(
+        `Initialized git repo at ${rootName} — wrote a default .gitignore (node_modules, build outputs, OS junk). Edit it before your first commit if you need to.`,
+        'success',
+      )
     } catch (e) {
       const msg = String(e)
       set({ error: msg })
@@ -1401,6 +1532,26 @@ export const useStore = create<VersaState>((set, get) => ({
 
     if (pathspec !== null && pathspec.length === 0) {
       showToast(tt('toast.active_group_empty'), 'error')
+      return
+    }
+
+    // Sanity cap: a freshly-init'd repo with no .gitignore will happily
+    // try to commit every file in the working tree — including node_modules,
+    // target/, build outputs, etc. `git add -A` on 50k+ files takes
+    // minutes AND ruins the repo by tracking all that junk. Refuse to
+    // commit when the active scope balloons past a sane threshold and
+    // tell the user to set up .gitignore first.
+    const scopedFiles = pathspec === null
+      ? (repoStatus?.files ?? [])
+      : (repoStatus?.files ?? []).filter(f => pathspec.includes(f.path))
+    if (scopedFiles.length > COMMIT_MAX_FILES) {
+      showToast(
+        tt('toast.commit_too_many_files', {
+          count: scopedFiles.length,
+          cap: COMMIT_MAX_FILES,
+        }),
+        'error',
+      )
       return
     }
 
@@ -2104,6 +2255,22 @@ export const useStore = create<VersaState>((set, get) => ({
   setFileTreeView: (on) => {
     localStorage.setItem('versa:fileTreeView', on ? '1' : '0')
     set({ fileTreeView: on })
+  },
+
+  toggleStarredRepo: (workspaceRoot) => {
+    set(s => {
+      const has = s.starredRepos.includes(workspaceRoot)
+      const next = has
+        ? s.starredRepos.filter(r => r !== workspaceRoot)
+        : [...s.starredRepos, workspaceRoot]
+      localStorage.setItem('versa:starredRepos', JSON.stringify(next))
+      return { starredRepos: next }
+    })
+  },
+
+  setRepoListCollapsed: (collapsed) => {
+    localStorage.setItem('versa:repoListCollapsed', collapsed ? '1' : '0')
+    set({ repoListCollapsed: collapsed })
   },
 
   loadBisectStatus: async () => {

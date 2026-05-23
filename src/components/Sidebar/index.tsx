@@ -62,7 +62,18 @@ export function Sidebar() {
   // root cause of the "switch to loom is laggy" report.
   useEffect(() => {
     if (!repoStatus) return
-    if (selectedFile || selectedCommit) return
+    if (selectedCommit) return
+    // Clear any stale selectedFile that no longer has working-tree
+    // changes — typically because the user just committed it, discarded
+    // it, or it was staged-and-removed. Without this, the Diff panel
+    // keeps a header for a file that has nothing to diff.
+    const stillExists = selectedFile && repoStatus.files.some(f => f.path === selectedFile)
+    if (selectedFile && !stillExists) {
+      useStore.setState({ selectedFile: null, diff: [] })
+    }
+    // If we still have a valid pick (set by the user manually or a
+    // previous auto-pick), don't second-guess them.
+    if (stillExists) return
     // Belt-and-suspenders submodule detection:
     //   1. The `isSubmodule` flag from Rust (preferred).
     //   2. The workspace's known sub-repo paths as a fallback in case the
@@ -118,6 +129,13 @@ export function Sidebar() {
   // explicit loading state instead so the user knows the click registered.
   if (!repoStatus) {
     if (!repoPath) return null
+    // Empty-workspace case: user picked a non-git folder, no repo to
+    // load. App.tsx renders `<WorkspaceOverview />` (with the init
+    // card) in this state — Sidebar would just be an infinite spinner.
+    // Return null so the dashboard owns the screen.
+    const tabs = useStore.getState().tabs
+    const emptyWs = tabs.find(t => t.root === repoPath && t.repos.length === 0)
+    if (emptyWs) return null
     return (
       <aside className="sidebar">
         <div className="empty-state center" style={{ paddingTop: 32 }}>
@@ -272,7 +290,11 @@ export function Sidebar() {
                     className={`file-item ${selectedFile === f.path && !selectedFileStaged ? 'selected' : ''}`}
                     onClick={() => selectFile(f.path, false)}
                   >
-                    <span className={`fbadge status-${f.unstagedStatus}`}>{f.unstagedStatus}</span>
+                    {f.unstagedStatus === '?' ? (
+                      <span className="fbadge status-untracked" title={t('sidebar.untracked')}>N</span>
+                    ) : (
+                      <span className={`fbadge status-${f.unstagedStatus}`}>{f.unstagedStatus}</span>
+                    )}
                     <div className="file-info">
                       <span className="file-name">{f.path.split('/').pop()}</span>
                     </div>

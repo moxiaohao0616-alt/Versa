@@ -15,7 +15,11 @@ export function WorkspaceOverview() {
   // Resolve the workspace the user is currently inside. `repoPath` is still
   // the workspace's `activeRepo` even in overview mode (we keep it pointed at
   // a real path so per-repo state like watcher/terminal continue working).
-  const ws = tabs.find(w => w.repos?.some(r => r.path === repoPath))
+  // Match by ws.root too so the empty-workspace case (no repos yet — repoPath
+  // == workspace root placeholder) still resolves.
+  const ws = tabs.find(w =>
+    w.root === repoPath || w.repos?.some(r => r.path === repoPath),
+  )
 
   // Pull each sub-repo's status from the right place:
   // - For the activeRepo, prefer the live `repoStatus` (so we see fresh data
@@ -76,7 +80,7 @@ export function WorkspaceOverview() {
         </div>
       )}
 
-      <div className="ws-overview-grid">
+      {ws.repos.length > 0 && <div className="ws-overview-grid">
         {cards.map(({ repo, status }) => {
           const dirty = countDirty(status?.files)
           const isClean = status !== null && dirty === 0
@@ -132,7 +136,7 @@ export function WorkspaceOverview() {
             </button>
           )
         })}
-      </div>
+      </div>}
     </div>
   )
 }

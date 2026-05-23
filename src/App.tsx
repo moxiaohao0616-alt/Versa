@@ -14,7 +14,8 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { CompareView } from './components/Compare'
 import { GraphView } from './components/Graph'
 import { ConflictView } from './components/Conflict'
-import { TabStrip } from './components/TabStrip'
+import { RepoListSidebar } from './components/RepoListSidebar'
+import { RepoPalette } from './components/RepoPalette'
 import { SubRepoStrip } from './components/SubRepoStrip'
 import { WorkspaceOverview } from './components/WorkspaceOverview'
 import { BisectBanner } from './components/Bisect'
@@ -39,6 +40,7 @@ export default function App() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(() => shouldShowOnboarding())
   const [dragging, setDragging] = useState(false)
@@ -81,6 +83,13 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
       const s = useStore.getState()
+
+      // ⌘P — open repo quick-switcher palette
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
 
       // ⌘` — toggle terminal
       if (e.key === '`') {
@@ -339,21 +348,45 @@ export default function App() {
           }
         }}
       >
+        {/* Active repo title — workspace name and, for multi-repo
+            workspaces, the currently-focused sub-repo. Sits in the
+            centre of the titlebar so it's visible from a glance no
+            matter how wide the window is. */}
+        {repoPath && (() => {
+          const activeWs = tabs.find(w =>
+            w.root === repoPath || w.repos.some(r => r.path === repoPath),
+          )
+          if (!activeWs) return null
+          const sub = activeWs.repos.find(r => r.path === repoPath)
+          const showSub = (activeWs.repos.length > 1) && sub && sub.path !== activeWs.root
+          return (
+            <div className="titlebar-title">
+              <i className={`ti ${activeWs.repos.length > 1 ? 'ti-folders' : 'ti-folder'}`} />
+              <span className="titlebar-title-name">{activeWs.name}</span>
+              {showSub && (
+                <>
+                  <span className="titlebar-title-sep">·</span>
+                  <span className="titlebar-title-sub">{sub!.name}</span>
+                </>
+              )}
+            </div>
+          )
+        })()}
         {repoStatus && <BranchSwitcher variant="indicator" />}
         <SyncStatus />
       </div>
 
-      <div className="app-header">
-        <UpdateBanner />
-        <TabStrip />
-        {/* 1px hairline between parent tabs and sub-repo strip. Lights up
-            whenever a tab / sub-repo switch is in flight — sits exactly at
-            the boundary the user is interacting with, so the visual
-            feedback shows up at the source of the click. Always rendered
-            so the slot doesn't shift the layout when it activates. */}
-        <div className={`tab-switch-bar ${busy ? 'active' : ''}`} />
-        <SubRepoStrip />
-      </div>
+      <div className="app-stack">
+      <UpdateBanner />
+
+      <div className="app-main-row">
+        <RepoListSidebar />
+        <div className="app-content-col">
+          {/* 1px hairline at the top of the content column. Lights up
+              whenever a switch / load is in flight. Sits exactly where the
+              repo content meets the chrome. */}
+          <div className={`tab-switch-bar ${busy ? 'active' : ''}`} />
+          <SubRepoStrip />
 
       {!repoPath ? (
         <WelcomeScreen onOpen={handleOpenRepo} />
@@ -365,10 +398,16 @@ export default function App() {
             // Workspace overview mode — active when the current workspace tab
             // is in dashboard view. Takes over the entire body below icon-bar
             // (no Sidebar / Diff, no right panel).
-            const activeWs = tabs.find(w => w.repos?.some(r => r.path === repoPath))
-            const inWorkspaceOverview = !!activeWs
-              && activeWs.view === 'overview'
-              && (activeWs.repos?.length ?? 0) > 1
+            //
+            // Matching: ws.repos for the normal case, ws.root for the empty
+            // workspace case (no repos yet — repoPath == workspace root
+            // placeholder). N=1 workspaces are forced to view='repo' on
+            // creation so the dashboard never accidentally shows for a
+            // single-repo tab.
+            const activeWs = tabs.find(w =>
+              w.root === repoPath || w.repos?.some(r => r.path === repoPath),
+            )
+            const inWorkspaceOverview = !!activeWs && activeWs.view === 'overview'
             // Icon-bar tabs target a focused sub-repo, so clicking any of them
             // while in overview implicitly flips the workspace back to 'repo'
             // view on its activeRepo.
@@ -470,9 +509,13 @@ export default function App() {
             )
           })()}
           </div>
-          {terminalOpen && <Terminal />}
         </>
       )}
+        </div>
+      </div>
+      {terminalOpen && <Terminal />}
+      </div>
+      {paletteOpen && <RepoPalette onClose={() => setPaletteOpen(false)} />}
       {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
       {onboardingOpen && <OnboardingModal onClose={() => setOnboardingOpen(false)} />}

@@ -452,15 +452,37 @@ pub fn scan_workspace(path: String) -> Result<WorkspaceScan, String> {
     })
 }
 
+/// Embedded default .gitignore template — covers common build outputs and
+/// dependency dirs across Node, Rust, Python, Java/Kotlin, Android, iOS,
+/// Flutter, Go, C/C++, plus OS-level and editor junk. Without this a fresh
+/// `git init` on a real project would otherwise stage `node_modules` /
+/// `target` / `Pods` / etc. on the next "Save Progress", which is almost
+/// always wrong.
+const DEFAULT_GITIGNORE: &str = include_str!("../assets/default-gitignore.txt");
+
 /// `git init` the given path and return its initial repo status. Used by the
 /// workspace overview's "Initialize git here" card so the user can adopt an
 /// uninitialized project folder without dropping to a terminal.
+///
+/// Side effect: writes a default `.gitignore` if the folder doesn't already
+/// have one. This saves the user from immediately committing node_modules /
+/// build outputs on their first save_progress.
 #[tauri::command]
 pub async fn git_init_repo(path: String) -> Result<RepoStatus, String> {
     // libgit2's init creates `.git/` with the standard layout. Default branch
     // follows the user's `init.defaultBranch` config (or `master`); we don't
     // hard-code one so behaviour matches what `git init` would do at the CLI.
     Repository::init(&path).map_err(fe)?;
+
+    // Drop in a default .gitignore if missing. Don't overwrite the user's
+    // existing file — they may have curated it already.
+    let gitignore_path = std::path::Path::new(&path).join(".gitignore");
+    if !gitignore_path.exists() {
+        // Best-effort: failure here doesn't break the init (repo is still
+        // usable without a .gitignore). User can re-run or write their own.
+        let _ = std::fs::write(&gitignore_path, DEFAULT_GITIGNORE);
+    }
+
     // Reuse open_repo for the status payload so the frontend gets the same
     // shape it sees everywhere else.
     open_repo(path, None)
@@ -3499,7 +3521,21 @@ async fn call_ai_stream(
     let mut req = client.post(&url).header("content-type", "application/json").json(&body);
     for (k, v) in &header_pairs { req = req.header(*k, v); }
 
-    let resp = req.send().await.map_err(fe)?;
+    // Diagnostic: emit a frontend-visible event at each network milestone
+    // so we can tell exactly where the request hangs (before send, between
+    // send and response headers, or during body streaming).
+    let _ = app.emit(event_name, serde_json::json!({
+        "stage": "sending", "url": &url, "provider": provider,
+    }));
+    let send_started = std::time::Instant::now();
+    let resp = req.send().await.map_err(|e| {
+        format!("send() failed after {}ms: {}", send_started.elapsed().as_millis(), e)
+    })?;
+    let _ = app.emit(event_name, serde_json::json!({
+        "stage": "response_headers",
+        "status": resp.status().as_u16(),
+        "elapsedMs": send_started.elapsed().as_millis() as u64,
+    }));
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.map_err(fe)?;
@@ -3547,6 +3583,13 @@ async fn call_ai_stream(
         let chunk = chunk.map_err(fe)?;
         let text = normalize(std::str::from_utf8(&chunk).map_err(|e| e.to_string())?);
         buffer.push_str(&text);
+
+        // Emit a heartbeat for every chunk we receive — even chunks that
+        // produce no `delta` (e.g. Anthropic `ping` events every 15s, or
+        // OpenAI `[DONE]` markers, or model "thinking" prefaces). Lets
+        // the JS-side idle timeout know the connection is still alive
+        // so it doesn't kill a slow-but-active stream after 60s of pings.
+        let _ = app.emit(event_name, serde_json::json!({ "heartbeat": true }));
 
         while let Some(end) = buffer.find("\n\n") {
             if cancel.load(Ordering::Relaxed) { cancelled = true; break 'outer }
