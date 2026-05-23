@@ -1,7 +1,7 @@
 <div align="center">
   <img src="src-tauri/icons/icon-source.svg.png" width="120" alt="Versa logo" />
   <h1>Versa</h1>
-  <p><strong>Easy Git for Everyone</strong></p>
+  <p><strong>Easy Git for vibe coders</strong></p>
   <p>
     <a href="https://github.com/moxiaohao0616-alt/Versa/actions/workflows/check.yml"><img src="https://github.com/moxiaohao0616-alt/Versa/actions/workflows/check.yml/badge.svg" alt="check" /></a>
     <a href="https://github.com/moxiaohao0616-alt/Versa/actions/workflows/build.yml"><img src="https://github.com/moxiaohao0616-alt/Versa/actions/workflows/build.yml/badge.svg" alt="build" /></a>
@@ -28,6 +28,26 @@ shell, ⌘\` opens a multi-tab xterm at the repo root.
 
 ---
 
+## What's new in `alpha.14`
+
+- 🔎 **Global content search** (`⌘⇧F`) across the whole workspace — `git
+  grep` backed, regex / case / pathspec, click a hit and the full file
+  shows up in the right pane with every match inline-highlighted.
+- 🗂️ **Left-side repo dock** replaces the old top tab strip — starred
+  + recent groups, collapsible to icons, `⌘P` fuzzy quick-switcher.
+- 🆕 **Open any folder, even without `.git`** — Versa offers to `git init`
+  and ships a batteries-included `.gitignore` (Node / Rust / Python /
+  Java / Android / iOS / Flutter / Go / C++).
+- 🚦 **Untracked files render a red N** instead of `?`, and the
+  sidebar's commit-count badge updates the moment you save progress —
+  no need to tab away and back.
+- 🧯 Terminal QoL — typing `exit` closes the tab (last tab dismisses
+  the whole panel), and new tabs no longer print a stray `^L`.
+
+See the [release notes](https://github.com/moxiaohao0616-alt/Versa/releases) for the full history.
+
+---
+
 ## Why Versa
 
 Most Git GUIs either bind you to one editor (heavy IDE plugins) or paper
@@ -35,13 +55,14 @@ over what git is actually doing (SourceTree / GitKraken Free / Tower).
 Versa picks a different lane — and earns each line below by being
 something the others aren't:
 
-- **AI commit messages, AI conflict resolution — BYO key, no Versa
-  server in the loop.** Generate commit messages from the staged diff,
-  get a "use ours / theirs / both" recommendation with a one-sentence
-  rationale on a real 3-way merge conflict, ask "what does this commit
-  do?" in plain English. Anthropic, OpenAI, DeepSeek, Kimi, or any
-  OpenAI-compatible endpoint — your key only lives in this machine's
-  localStorage. Code, diffs and API keys never leave the box.
+- **AI does the boring git parts so you don't have to.** Let the model
+  write your commit message from the staged diff, read a real 3-way
+  conflict and tell you which side to keep with a one-sentence rationale,
+  explain what a 200-line merge commit actually did in plain English,
+  draft your PR description from the branch range. The provider is
+  yours (Anthropic / OpenAI / DeepSeek / Kimi / any OpenAI-compatible) —
+  your key lives in this machine's localStorage, your code and diffs go
+  **directly** to the provider, never through a Versa server.
 - **Changelists for selective commits.** Park files you don't want in
   *this* commit into a custom group (drag-and-drop between groups,
   including whole folders in tree mode). Designate any group as the
@@ -55,9 +76,16 @@ something the others aren't:
   review screen with the full staged diff — see exactly what's about to
   ship before clicking "Finish merge".
 - **Multi-tab terminal at the repo root.** ⌘\` toggles a real xterm with
-  per-repo tabs that survive panel toggles AND repo switches. The UI
-  walks you through hairy workflows; when you'd rather drop to git CLI,
-  you're one keystroke away.
+  per-repo tabs that survive panel toggles AND repo switches. Typing `exit`
+  closes the tab — last tab dismisses the whole panel, just like a real
+  terminal app. The UI walks you through hairy workflows; when you'd
+  rather drop to git CLI, you're one keystroke away.
+- **Global code search across the workspace** (⌘⇧F). `git grep`-backed so
+  `.gitignore` is automatically honored, fixed-string + regex + case
+  modes, pathspec filter (`*.ts`, `src/`). Click a hit to open a full
+  file preview with every match inline-highlighted and the active line
+  centered. Shares state with the icon-bar Search tab — same query
+  visible in both surfaces.
 - **Rust + libgit2 for the data plane.** Native libgit2 instead of
   shelling out for every status call, virtualized diff rendering keeps
   10K+ line diffs scrollable, and the commit-history graph auto-compresses
@@ -70,9 +98,11 @@ something the others aren't:
 - **Bisect + Interactive rebase as guided workflows.** Drag-and-drop rebase
   with drop / squash / reword; bisect with an AI-suggested starting commit
   read from recent commit messages and one-click good / bad / skip.
-- **Multi-tab repo management.** Each repo runs in its own tab with
-  isolated state — file lists, terminals, changelists, AI streams all
-  scoped per tab.
+- **Left-side repo dock (collapsible to icons), not a top tab strip.**
+  220px sidebar of open repos with starred-on-top sort, recent list and
+  amber "dirty" dots; press ⌘P for a fuzzy quick-switcher palette.
+  Each repo runs in its own tab with isolated state — file lists,
+  terminals, changelists, AI streams, search results all scoped per tab.
 - **Free, open source, no tiers.** Apache 2.0; no "GitKraken Pro for
   private repos", no Tower subscription, no contributor agreement. An
   optional Versa Cloud is in the works for cross-machine settings sync
@@ -89,7 +119,15 @@ something the others aren't:
 - **Hunk-level staging** — pick the change, not the file
 - **Folder tree view** for staged/unstaged lists (Settings → General toggle),
   flat list otherwise; per-folder collapse state survives working-tree refresh
-- Multi-tab repo management with per-tab state snapshots
+- Left-side repo dock (220px / icon-only collapsed) with starred + recent
+  groups; ⌘P fuzzy quick-switcher
+- **Open any folder, even without `.git`** — non-git folders show an
+  *Initialize repository here* card, and `git init` ships a batteries-included
+  `.gitignore` covering Node / Rust / Python / Java / Android / iOS / Flutter
+  / Go / C++ build artefacts so you don't accidentally `git add -A` a 90k-file
+  `node_modules`
+- Untracked files render a red **N** badge instead of the ambiguous `?` —
+  one less moment of "wait is this thing tracked or not"
 - Click any file path in the diff header to copy its absolute path (paste into
   IDE, Finder, terminal — no more selecting Next.js route segments by hand)
 - Multi-tab embedded xterm (⌘\`) for the moments you do want CLI
@@ -195,12 +233,30 @@ something the others aren't:
 
 </details>
 
+<details open><summary><b>Global content search</b></summary>
+
+- ⌘⇧F opens a modal that searches every tracked file in the workspace
+  (every sub-repo when working with a monorepo / submodule parent)
+- Same panel is also available as the **Search tab** on the left icon
+  bar — modal and tab share state, so a query in either is visible in
+  the other (modal = fast "search → click → Esc"; tab = persistent,
+  multi-query exploration)
+- `git grep` backend: respects `.gitignore`, fixed-string + regex,
+  case-sensitive toggle, pathspec filter
+- Click any hit → **right-pane preview shows the full file** with all
+  matches inline-highlighted and the clicked line auto-scrolled into
+  view. Files up to 2 MB render in full; larger files show a
+  *truncated* tag; binary files are detected and skipped
+
+</details>
+
 <details open><summary><b>Embedded terminal (multi-tab)</b></summary>
 
 - ⌘\` toggles a bottom panel with xterm.js + a real PTY (zsh / bash / etc.)
 - **Per-repo tab strip**: every repo keeps its own list of terminal tabs.
   Switching repos shows that repo's tabs; switching back restores them.
 - Sessions survive panel toggle (`⌘\`` close + reopen → tabs intact)
+- Typing `exit` closes the tab; closing the last tab dismisses the panel
 - One-click new (+) / close (×) on every tab
 - Honors the user's `$SHELL` and login files so `$PATH` / aliases just work
 
@@ -300,10 +356,12 @@ Press `?` anytime for the full sheet. Highlights (`⌘` is `Ctrl` on Windows / L
 | --- | --- |
 | `?` | Open this cheatsheet |
 | `Esc` | Close the current modal · cancel the active AI stream |
+| `⌘P` | Open the repo quick-switcher palette |
+| `⌘⇧F` | **Global content search** across the workspace |
+| `⌘F` | Search inside the current diff |
 | `⌘\`` | Toggle the embedded terminal panel |
 | `⌘W` | Close the current repo tab |
 | `⌘⇧] / ⌘⇧[` | Next / previous repo tab |
-| `⌘F` | Search inside the current diff |
 | `⌘↑ / ⌘↓` | Previous / next **file** in the diff |
 | `⌥↑ / ⌥↓` | Previous / next **hunk** in the diff |
 
@@ -366,6 +424,7 @@ for shipped versions. What's done vs. what's still cooking before a public 1.0:
 
 **Shipped**
 
+- ✅ **Global content search** across the workspace (`⌘⇧F`, `git grep`-backed, full-file preview)
 - ✅ Hunk staging · Tag mgmt · Reflog · Blame · Reset · Fetch · Remotes · Submodules · LFS
 - ✅ Interactive rebase (drag-and-drop, drop / squash / reword)
 - ✅ Bisect (with AI start-commit suggestion)
@@ -390,11 +449,19 @@ for shipped versions. What's done vs. what's still cooking before a public 1.0:
 - 🚧 GraphView virtualization for 50k+ commit repos
 - 🚧 Full i18n sweep across all components (resource files ready)
 
-**Looking further**
+**Looking further — extending AI from commit into the PR / review flow**
 
-- 🔭 In-app issue tracker integration (GitHub Issues / Jira)
-- 🔭 AI PR description with linked-ticket context
-- 🔭 Versa Cloud AI Gateway (managed prompt-cache layer for teams)
+If AI already writes your commit message, the next obvious step is to
+make the PR and post-PR loop just as effortless:
+
+- 🔭 **AI-drafted PR descriptions with linked-ticket context** — read the
+  Jira / Linear / GitHub issue referenced in the branch name and bake
+  that into the PR body, not just the diff.
+- 🔭 **PR pill in the branch switcher** — current branch's open PR + CI
+  status visible at a glance; one click opens it in the browser.
+- 🔭 **In-app issue tracker integration** (GitHub Issues / Jira / Linear)
+  so the ticket and the branch live next to each other.
+- 🔭 Versa Cloud AI Gateway (managed prompt-cache layer for teams).
 
 ## Tests
 

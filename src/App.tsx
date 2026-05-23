@@ -12,6 +12,7 @@ import { Settings } from './components/Settings'
 import { BranchesView } from './components/Branches'
 import { UpdateBanner } from './components/UpdateBanner'
 import { CompareView } from './components/Compare'
+import { SearchPanel, SearchModal } from './components/Search'
 import { GraphView } from './components/Graph'
 import { ConflictView } from './components/Conflict'
 import { RepoListSidebar } from './components/RepoListSidebar'
@@ -41,6 +42,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(() => shouldShowOnboarding())
   const [dragging, setDragging] = useState(false)
@@ -110,6 +112,13 @@ export default function App() {
           window.dispatchEvent(new CustomEvent('versa:open-diff-search'))
           return
         }
+      }
+      // ⌘⇧F — global content search modal. Mirrors the icon-bar Search tab
+      // (they share Zustand state, see [[feedback-shared-search-state]]).
+      if (e.key.toLowerCase() === 'f' && e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        setSearchOpen(true)
+        return
       }
       // ⌘⇧] / ⌘⇧[ — next / previous workspace tab
       if (e.shiftKey && (e.key === ']' || e.key === '[' || e.key === '}' || e.key === '{')) {
@@ -434,6 +443,7 @@ export default function App() {
               <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-search" tab="search" label={t('tabs.search', 'Search')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <div className="spacer" />
               {inNormalView && (
                 <button
@@ -499,6 +509,7 @@ export default function App() {
                     {activeTab === 'branches' ? <BranchesView />
                       : activeTab === 'history' ? <GraphView />
                       : activeTab === 'compare' ? <CompareView />
+                      : activeTab === 'search' ? <SearchPanel />
                       : <DiffView />}
                   </main>
                   {rsVisible && <RightSidebar />}
@@ -516,6 +527,7 @@ export default function App() {
       {terminalOpen && <Terminal />}
       </div>
       {paletteOpen && <RepoPalette onClose={() => setPaletteOpen(false)} />}
+      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} />}
       {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
       {onboardingOpen && <OnboardingModal onClose={() => setOnboardingOpen(false)} />}
@@ -535,7 +547,7 @@ function IconBtn({
   icon, tab, label, onClick
 }: {
   icon: string
-  tab?: 'changes' | 'history' | 'branches' | 'compare'
+  tab?: 'changes' | 'history' | 'branches' | 'compare' | 'search'
   label: string
   onClick?: () => void
 }) {

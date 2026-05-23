@@ -10,6 +10,14 @@ import { useStore, type TermSession } from '../../store'
 import { useAgentStore } from '../../lib/agents'
 import { promoteAgentExitToChangelist } from '../../agents/lifecycle'
 
+/** Sessions we've already opened during this app run. Used to tell apart
+ *  the *first* mount (true cold-start — shell prints its own prompt) from
+ *  a *re-mount* (user navigated away and back, PTY still alive — last frame
+ *  is gone, we need to nudge with ctrl+L). Without this, every fresh
+ *  terminal opens with a literal `^L` showing in the scrollback because
+ *  zsh echoes the control char before its line editor is set up. */
+const openedSessions = new Set<string>()
+
 /** Pick the xterm palette based on the app theme.
  *  - Dark: Tokyo-Night-ish, plays well on near-black bg
  *  - Light: high-contrast solarized-ish, designed to read on cream bg
@@ -462,20 +470,31 @@ function TerminalPane({
       unOut = outFn
 
       // Agent tabs fire the auto-changelist promotion when their CLI exits.
-      // Shell tabs use a no-op handler (the shell exiting just means the
-      // tab is dead until manually closed).
+      // Shell tabs auto-close on exit: typing `exit` should dismiss the tab
+      // (and the whole panel if it was the last tab), the same way a real
+      // terminal app would — leaving a dead [process exited] tab around is
+      // dead weight.
       const exitFn = await listen<void>(`pty:exit:${session.id}`, () => {
+        const store = useStore.getState()
+        const repo = store.repoPath
         if (session.agentId) {
-          useStore.getState().markAgentTerminalExited(session.id)
-          // Look up the freshly-updated session (with exited=true) and run
-          // the snapshot diff. Fire-and-forget — UI does not block on this.
-          const repo = useStore.getState().repoPath
+          store.markAgentTerminalExited(session.id)
           if (repo) {
             const updated = useStore
               .getState()
               .terminalsByRepo[repo]
               ?.find((s) => s.id === session.id)
             if (updated) void promoteAgentExitToChangelist(updated)
+          }
+        } else if (repo) {
+          // Shell tab: close it. Forget the session so a future tab with
+          // the same id (extremely unlikely but cheap) doesn't get a
+          // stale ctrl+L nudge.
+          openedSessions.delete(session.id)
+          store.closeTerminal(repo, session.id)
+          const remaining = useStore.getState().terminalsByRepo[repo] ?? []
+          if (remaining.length === 0) {
+            useStore.getState().setTerminalOpen(false)
           }
         }
       })
@@ -502,18 +521,16 @@ function TerminalPane({
       }
       if (!alive) return
 
-      // Nudge the shell/agent to redraw its prompt. ctrl+L is universally
-      // "clear and redraw" for interactive REPLs (zsh, bash, fish, claude,
-      // codex). Handles:
-      //   (1) Re-attach — repo switch returned to a still-alive PTY whose
-      //       last frame our fresh xterm doesn't have.
-      //   (2) Initial-open race — listener wins the race ≈always with the
-      //       fix above, but slow machines occasionally still drop the
-      //       very first byte; ctrl+L is the safety net.
-      // For an exited agent tab there's nothing to nudge — skip.
-      if (!session.exited) {
+      // Only nudge with ctrl+L on RE-ATTACH (the user came back to a
+      // still-alive PTY whose last frame our fresh xterm doesn't have).
+      // For a brand-new session the shell prints its own prompt within
+      // milliseconds, and sending ctrl+L too early made zsh echo a literal
+      // `^L` into the first line of every new terminal.
+      // [[feedback-terminal-no-ctrl-L-on-first-open]]
+      if (!session.exited && openedSessions.has(session.id)) {
         invoke('pty_write', { sessionId: session.id, data: '\x0c' }).catch(() => {})
       }
+      openedSessions.add(session.id)
 
       disposeOnData = term.onData((data) => {
         invoke('pty_write', { sessionId: session.id, data }).catch(() => {})

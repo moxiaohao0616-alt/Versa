@@ -78,6 +78,7 @@ pub fn run() {
             pty::pty_open, pty::pty_write, pty::pty_resize, pty::pty_close,
             // Round 1: refs + remotes
             reset_to_commit, git_fetch,
+            grep_repo, read_file, read_file_context,
             list_remotes, add_remote, remove_remote, rename_remote, set_remote_url,
             list_tags, create_tag, delete_tag, push_tag, delete_remote_tag,
             // Round 2: reflog + GPG-aware commit

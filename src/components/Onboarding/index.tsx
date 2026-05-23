@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-const STORAGE_KEY = 'versa:onboarded'
+// Bump the suffix whenever the tour gets meaningful new content so existing
+// users see the updated steps exactly once. The old key is left in place
+// (we don't migrate it) so opting out before was a permanent dismissal of
+// *that version* — the user gets a fresh decision for new content.
+const STORAGE_KEY = 'versa:onboarded-v2'
 
 export function shouldShowOnboarding(): boolean {
   return localStorage.getItem(STORAGE_KEY) !== '1'
@@ -68,7 +72,12 @@ export function OnboardingModal({ onClose }: { onClose: () => void }) {
       body: (
         <>
           <p>{t('onboarding.step5_body_1')}</p>
-          <p>{t('onboarding.step5_body_2')}</p>
+          <ul style={{ paddingLeft: 18, lineHeight: 1.8 }}>
+            <li>{t('onboarding.step5_power_p')}</li>
+            <li>{t('onboarding.step5_power_shift_f')}</li>
+            <li>{t('onboarding.step5_power_backtick')}</li>
+          </ul>
+          <p style={{ marginTop: 6 }}>{t('onboarding.step5_body_2')}</p>
           <p style={{ opacity: 0.75, marginTop: 6 }}>{t('onboarding.step5_body_3')}</p>
         </>
       ),

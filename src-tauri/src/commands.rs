@@ -4311,6 +4311,179 @@ pub struct RemoteInfo {
     pub push_url: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub content: String,
+}
+
+/// Cross-file content search via `git grep`. Reasons we shell out:
+///   - Automatically respects `.gitignore` (no manually walking the tree)
+///   - Comes with every git install (no new dep)
+///   - Multithreaded by default; competitive with ripgrep for typical repos
+///
+/// Output is `--null` separated so paths with spaces / colons survive
+/// parsing intact. Hits are capped at MAX_RESULTS to keep the UI snappy
+/// for "open paren" -style queries that match everything.
+#[tauri::command]
+pub async fn grep_repo(
+    path: String,
+    query: String,
+    regex: Option<bool>,
+    case_sensitive: Option<bool>,
+    pathspec: Option<String>,
+) -> Result<Vec<SearchHit>, String> {
+    const MAX_RESULTS: usize = 1000;
+    if query.is_empty() {
+        return Ok(Vec::new())
+    }
+
+    let mut args: Vec<String> = vec![
+        // No-optional-locks so a read-only grep doesn't end up rewriting
+        // the index stat cache and tripping the file watcher.
+        "--no-optional-locks".into(),
+        "grep".into(),
+        // `-n` line numbers, `--column` column, `-I` skip binary files,
+        // `--null` (-z) NUL-separate fields so paths with `:` survive.
+        "-n".into(), "--column".into(), "-I".into(), "--null".into(),
+        "--no-color".into(),
+        // Cap matches per file so one huge file can't drown the others.
+        "--max-count=50".into(),
+    ];
+    if !case_sensitive.unwrap_or(false) { args.push("-i".into()) }
+    if regex.unwrap_or(false) {
+        args.push("-E".into()) // extended regex
+    } else {
+        args.push("-F".into()) // fixed string
+    }
+    // Sentinel between options and the pattern so a query starting with `-`
+    // (e.g. `--no-color`) isn't interpreted as a flag.
+    args.push("-e".into());
+    args.push(query.clone());
+    if let Some(spec) = pathspec.as_ref().filter(|s| !s.trim().is_empty()) {
+        args.push("--".into());
+        args.push(spec.clone());
+    }
+
+    let out = tokio::process::Command::new("git")
+        .args(&args)
+        .current_dir(&path)
+        .output()
+        .await
+        .map_err(fe)?;
+
+    // Exit code 1 = no matches (not an error). Exit code 128 = real error.
+    if !out.status.success() {
+        let code = out.status.code().unwrap_or(0);
+        if code == 1 {
+            return Ok(Vec::new())
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() { format!("git grep failed (code {})", code) } else { stderr });
+    }
+
+    // Output format with --null: <path>\0<line>\0<col>\0<content>\n
+    let mut hits: Vec<SearchHit> = Vec::new();
+    for raw_line in out.stdout.split(|b| *b == b'\n') {
+        if raw_line.is_empty() { continue }
+        // Split on NUL (`\0`).
+        let mut parts = raw_line.splitn(4, |b| *b == 0);
+        let file = match parts.next() {
+            Some(b) => String::from_utf8_lossy(b).into_owned(),
+            None => continue,
+        };
+        let line_n: u32 = parts.next()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let col_n: u32 = parts.next()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let content = parts.next()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_default();
+        if line_n == 0 { continue }
+        hits.push(SearchHit {
+            file,
+            line: line_n,
+            column: col_n,
+            content,
+        });
+        if hits.len() >= MAX_RESULTS { break }
+    }
+    Ok(hits)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    pub content: String,
+    pub truncated: bool,
+    pub line_count: u32,
+    pub is_binary: bool,
+}
+
+/// Read the full text of a file under the workspace root for the search
+/// preview pane. Caps at MAX_BYTES so opening a 200 MB JSON dump can't
+/// lock up the UI — we slice at a UTF-8 char boundary and set `truncated`
+/// so the frontend can show a banner. Returns `is_binary: true` (with
+/// empty content) when we detect a NUL byte in the first sample so the UI
+/// shows a "binary file" hint instead of rendering garbage.
+#[tauri::command]
+pub fn read_file(path: String, file: String) -> Result<FilePreview, String> {
+    const MAX_BYTES: usize = 2 * 1024 * 1024;
+    let abs = std::path::Path::new(&path).join(&file);
+    let bytes = std::fs::read(&abs).map_err(fe)?;
+    let truncated = bytes.len() > MAX_BYTES;
+    let slice: &[u8] = if truncated { &bytes[..MAX_BYTES] } else { &bytes };
+    let sniff_end = slice.len().min(8 * 1024);
+    let is_binary = slice[..sniff_end].contains(&0u8);
+    if is_binary {
+        return Ok(FilePreview {
+            content: String::new(),
+            truncated,
+            line_count: 0,
+            is_binary: true,
+        })
+    }
+    let mut content = String::from_utf8_lossy(slice).into_owned();
+    while !content.is_empty() && !content.is_char_boundary(content.len()) {
+        content.pop();
+    }
+    let line_count = content.lines().count() as u32;
+    Ok(FilePreview { content, truncated, line_count, is_binary: false })
+}
+
+/// Read a small slice of a file around `line` for the search-result preview
+/// — N lines above and below. Returns empty string for files we can't read
+/// (binary, gone, permission denied) so the UI just shows the matched line.
+#[tauri::command]
+pub fn read_file_context(
+    path: String,
+    file: String,
+    line: u32,
+    context: Option<u32>,
+) -> Result<Vec<String>, String> {
+    let n = context.unwrap_or(5);
+    let abs = std::path::Path::new(&path).join(&file);
+    let text = match std::fs::read_to_string(&abs) {
+        Ok(s) => s,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    if (line as usize) == 0 || (line as usize) > lines.len() {
+        return Ok(Vec::new())
+    }
+    let center = line as usize - 1;
+    let start = center.saturating_sub(n as usize);
+    let end = (center + n as usize + 1).min(lines.len());
+    Ok(lines[start..end].iter().map(|s| s.to_string()).collect())
+}
+
 #[tauri::command]
 pub fn list_remotes(path: String) -> Result<Vec<RemoteInfo>, String> {
     let repo = Repository::open(&path).map_err(fe)?;

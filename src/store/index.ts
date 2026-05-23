@@ -314,6 +314,13 @@ export interface MergeRiskReport {
   files: FileRisk[]
 }
 
+export interface SearchHit {
+  file: string
+  line: number
+  column: number
+  content: string
+}
+
 export interface RemoteInfo {
   name: string
   url: string
@@ -506,7 +513,7 @@ interface RepoSnapshot {
   diff: DiffResult[]
   commits: CommitInfo[]
   commitMessage: string
-  activeTab: 'changes' | 'history' | 'branches' | 'compare'
+  activeTab: 'changes' | 'history' | 'branches' | 'compare' | 'search'
   conflicts: ConflictFile[]
   selectedConflictFile: string | null
   conflictContent: ConflictContent | null
@@ -712,6 +719,14 @@ interface VersaState {
   // Diff
   diff: DiffResult[]
 
+  // Global content search (⌘⇧F + the Search tab share this state so a
+  // query typed in either surface is visible in the other).
+  searchQuery: string
+  searchOptions: { regex: boolean; caseSensitive: boolean; pathspec: string }
+  searchResults: SearchHit[]
+  searchLoading: boolean
+  searchError: string | null
+
   // History
   commits: CommitInfo[]
 
@@ -719,7 +734,7 @@ interface VersaState {
   recentRepos: RecentRepo[]
 
   // UI
-  activeTab: 'changes' | 'history' | 'branches' | 'compare'
+  activeTab: 'changes' | 'history' | 'branches' | 'compare' | 'search'
   terminalOpen: boolean
   // Per-repo terminal sessions. Each repo keeps its own list of PTY tabs
   // alive across repo switches; switching back restores whatever was
@@ -909,6 +924,10 @@ interface VersaState {
   setDiffWordLevel: (on: boolean) => void
   setDiffSideBySide: (on: boolean) => void
   setFileTreeView: (on: boolean) => void
+  setSearchQuery: (q: string) => void
+  setSearchOptions: (patch: Partial<{ regex: boolean; caseSensitive: boolean; pathspec: string }>) => void
+  runSearch: () => Promise<void>
+  clearSearch: () => void
   toggleStarredRepo: (workspaceRoot: string) => void
   setRepoListCollapsed: (collapsed: boolean) => void
   /** Auto-expand graphLimit until `sha` is in the loaded window. Returns idx, or -1. */
@@ -1001,6 +1020,11 @@ export const useStore = create<VersaState>((set, get) => ({
   bisectStatus: null,
   currentAiStreamId: null,
   diff: [],
+  searchQuery: '',
+  searchOptions: { regex: false, caseSensitive: false, pathspec: '' },
+  searchResults: [],
+  searchLoading: false,
+  searchError: null,
   commits: [],
   recentRepos: JSON.parse(localStorage.getItem('versa:recentRepos') || '[]'),
   activeTab: 'changes',
@@ -1421,7 +1445,17 @@ export const useStore = create<VersaState>((set, get) => ({
       // moments earlier and broke auto-select.
       await loadRepoStatusInTwoSteps(repoPath, (status) => {
         if (get().repoPath !== repoPath) return
-        set({ repoStatus: status })
+        // Mirror into tabSnapshots so the RepoListSidebar badge (which
+        // reads from the snapshot, not the live repoStatus) updates the
+        // moment a commit/stage/discard clears or grows the file list,
+        // instead of waiting for the next tab-switch to overwrite it.
+        set(s => ({
+          repoStatus: status,
+          tabSnapshots: {
+            ...s.tabSnapshots,
+            [repoPath]: { ...(s.tabSnapshots[repoPath] ?? blankSnapshot()), repoStatus: status },
+          },
+        }))
       })
       // Stashes — cheap to enumerate, keep badge fresh on each refresh.
       try {
@@ -2255,6 +2289,40 @@ export const useStore = create<VersaState>((set, get) => ({
   setFileTreeView: (on) => {
     localStorage.setItem('versa:fileTreeView', on ? '1' : '0')
     set({ fileTreeView: on })
+  },
+
+  setSearchQuery: (q) => set({ searchQuery: q }),
+  setSearchOptions: (patch) => set(s => ({ searchOptions: { ...s.searchOptions, ...patch } })),
+  clearSearch: () => set({ searchResults: [], searchError: null, searchLoading: false }),
+  runSearch: async () => {
+    const { searchQuery, searchOptions, repoPath, tabs } = get()
+    const q = searchQuery.trim()
+    if (!q) {
+      set({ searchResults: [], searchError: null })
+      return
+    }
+    // Search the workspace root (which covers all sub-repos) rather than
+    // just the active sub-repo — typing "useEffect" without thinking about
+    // which sub-folder you're in is the whole point.
+    const tab = findWorkspaceFor(tabs, repoPath)
+    const root = tab?.root || repoPath
+    if (!root) {
+      set({ searchError: 'No repo open', searchResults: [] })
+      return
+    }
+    set({ searchLoading: true, searchError: null })
+    try {
+      const hits = await invoke<SearchHit[]>('grep_repo', {
+        path: root,
+        query: q,
+        regex: searchOptions.regex,
+        caseSensitive: searchOptions.caseSensitive,
+        pathspec: searchOptions.pathspec || null,
+      })
+      set({ searchResults: hits, searchLoading: false })
+    } catch (e: any) {
+      set({ searchError: String(e?.message || e), searchResults: [], searchLoading: false })
+    }
   },
 
   toggleStarredRepo: (workspaceRoot) => {

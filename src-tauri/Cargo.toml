@@ -1,7 +1,7 @@
 [package]
 name = "versa"
-version = "0.1.0-alpha.13"
-description = "Versa - Easy Git for Everyone"
+version = "0.1.0-alpha.14"
+description = "Versa - Easy Git for vibe coders"
 authors = ["you"]
 edition = "2021"
 

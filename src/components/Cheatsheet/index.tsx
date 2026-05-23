@@ -33,6 +33,7 @@ export function CheatsheetModal({ onClose }: { onClose: () => void }) {
       title: t('cheatsheet.group_diff'),
       items: [
         { keys: [MOD, 'F'],   desc: t('cheatsheet.search_diff') },
+        { keys: [MOD, '⇧', 'F'], desc: t('cheatsheet.search_workspace') },
         { keys: [MOD, '↑'],   desc: t('cheatsheet.prev_file') },
         { keys: [MOD, '↓'],   desc: t('cheatsheet.next_file') },
         { keys: ['Alt', '↑'], desc: t('cheatsheet.prev_hunk') },
