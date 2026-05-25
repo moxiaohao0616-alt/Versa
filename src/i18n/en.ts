@@ -887,6 +887,8 @@ export const en: Translations = {
     dock_to_bottom: 'Dock to bottom',
     collapse: 'Collapse panel',
     resize: 'Drag to resize',
+    project_scripts: 'Scripts',
+    shell_scripts: 'Shell scripts',
   },
 
   rightsidebar: {

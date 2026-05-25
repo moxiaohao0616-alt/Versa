@@ -38,11 +38,24 @@ fn fe<E: std::fmt::Display>(e: E) -> String {
 /// register it, and start the reader thread that pumps output to the
 /// webview as `pty:out:<session_id>` events. Already-existing sessions
 /// with the same id are silently replaced.
-#[tauri::command]
+/// POSIX-shell quote a single argument so it survives concatenation
+/// into a `-c "..."` command line. We single-quote anything that isn't
+/// purely alphanumeric + a few unambiguously-safe punctuation chars;
+/// embedded `'` becomes `'\''` (close-quote, escaped quote, reopen-quote).
+fn shell_quote(s: &str) -> String {
+    if s.is_empty() { return "''".into() }
+    if s.chars().all(|c| c.is_ascii_alphanumeric() || ".-_/=,:".contains(c)) {
+        return s.to_string()
+    }
+    let escaped = s.replace('\'', r"'\''");
+    format!("'{}'", escaped)
+}
+
 /// `command` = None → use `$SHELL` (default terminal-tab path);
 /// Some → spawn that binary instead (e.g. `claude`) for agent tabs.
-/// `args` = optional argv extras; ignored when `command` is None
-/// (the shell always gets its standard `-l`).
+/// In both cases we route through the user's login shell so the agent
+/// inherits the same PATH / proxy env it would get in a real terminal.
+#[tauri::command]
 pub fn pty_open<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, PtyRegistry>,
@@ -74,23 +87,31 @@ pub fn pty_open<R: Runtime>(
         })
         .map_err(fe)?;
 
-    // Choose what to run: user's $SHELL by default, or an explicit command
-    // (e.g. `claude`) for agent tabs. The shell variant always gets `-l` so
-    // login files source — important for $PATH discovery.
-    let mut cmd = if let Some(bin) = command.as_ref().filter(|c| !c.trim().is_empty()) {
-        let mut c = CommandBuilder::new(bin);
+    // Choose what to run: user's $SHELL by default, OR an explicit command
+    // (e.g. `claude`) for agent tabs. In BOTH cases we go through `$SHELL -l`
+    // so login files source — without that, GUI-launched Tauri only inherits
+    // the minimal `/usr/bin:/bin:/usr/sbin:/sbin` PATH, and tools installed
+    // by brew (`/opt/homebrew/bin`), nvm (`~/.nvm/...`), pyenv etc. aren't
+    // found ("Unable to spawn claude: not found in PATH" was that bug).
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.arg("-l");
+    if let Some(bin) = command.as_ref().filter(|c| !c.trim().is_empty()) {
+        // Build the full command line as one `-c` argument. We can't pass
+        // bin + args as separate argv entries because `-c CMD ARG1 ARG2…`
+        // routes ARG1+ into `$0 $1 …`, not to the spawned binary. Properly
+        // quote each piece so an agent flag with spaces (e.g. `--system
+        // "be terse"`) survives the round-trip.
+        let mut parts: Vec<String> = Vec::with_capacity(1 + args.as_ref().map(|a| a.len()).unwrap_or(0));
+        parts.push(shell_quote(bin));
         if let Some(extra) = args {
             for a in extra {
-                c.arg(a);
+                parts.push(shell_quote(&a));
             }
         }
-        c
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let mut c = CommandBuilder::new(&shell);
-        c.arg("-l");
-        c
-    };
+        cmd.arg("-c");
+        cmd.arg(parts.join(" "));
+    }
     // Fall back to $HOME if frontend doesn't have a repo path. We don't
     // want to inherit the app bundle's cwd (which is somewhere random).
     let resolved_cwd = if cwd.trim().is_empty() {

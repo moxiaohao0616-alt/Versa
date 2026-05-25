@@ -1020,10 +1020,35 @@ pub fn stage_file(path: String, file: String) -> Result<(), String> {
 #[tauri::command]
 pub fn discard_file(path: String, file: String) -> Result<(), String> {
     let repo = Repository::open(&path).map_err(fe)?;
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    checkout.path(&file).force();
-    repo.checkout_head(Some(&mut checkout)).map_err(fe)?;
-    Ok(())
+    // git2's `status_file` tells us whether this path is tracked. The
+    // operation that "discards" a file depends on which side it's on:
+    //   - tracked + modified/deleted → `git checkout HEAD -- file` (the
+    //     classic discard)
+    //   - untracked                  → physically remove from the
+    //     working tree. checkout_head is a no-op for untracked paths,
+    //     which is why clicking ↺ on a `?? newfile` previously did
+    //     nothing visible.
+    // Empty files / dirs that go missing between status() and rm() are
+    // also fine — we treat NotFound as success.
+    let st = repo.status_file(std::path::Path::new(&file))
+        .map_err(fe)?;
+    use git2::Status as S;
+    let is_untracked = st.contains(S::WT_NEW);
+    let is_tracked_change = st.intersects(S::WT_MODIFIED | S::WT_DELETED | S::WT_TYPECHANGE | S::WT_RENAMED);
+
+    if is_untracked && !is_tracked_change {
+        let abs = std::path::Path::new(&path).join(&file);
+        match std::fs::remove_file(&abs) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(fe(e)),
+        }
+    } else {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.path(&file).force();
+        repo.checkout_head(Some(&mut checkout)).map_err(fe)?;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -2063,12 +2088,146 @@ pub struct ProjectInfo {
     pub icon: String,
     /// "npm" | "yarn" | "pnpm" | "bun" | "cargo" | "go" | ""
     pub package_manager: String,
+    /// Package-manager-driven scripts (npm run X, cargo X, go X, …).
     pub commands: Vec<ProjectCommand>,
+    /// Raw shell scripts found in the repo root and in `scripts/`. Kept
+    /// separate from `commands` so the UI can render them in their own
+    /// block — a `deploy.sh` next to `npm run dev` shares a dropdown
+    /// otherwise and the user can't tell at a glance which is which.
+    pub shell_scripts: Vec<ProjectCommand>,
+}
+
+/// Scan two well-known locations for shell scripts the user might want
+/// to run from the sidebar: the repo root itself, and `scripts/`. We
+/// don't recurse further — most repos either put scripts at one of
+/// these two spots, and going deeper would risk indexing thousands of
+/// node_modules / target / vendored files.
+///
+/// Recognized by extension only (.sh / .bash / .zsh). Hidden files are
+/// skipped. Output is capped at 20 to keep the panel scannable.
+fn find_shell_scripts(root: &std::path::Path) -> Vec<ProjectCommand> {
+    fn visit(
+        dir: &std::path::Path,
+        prefix: &str,
+        out: &mut Vec<ProjectCommand>,
+    ) {
+        let entries = match std::fs::read_dir(dir) { Ok(it) => it, Err(_) => return };
+        for entry in entries.flatten() {
+            let name_os = entry.file_name();
+            let name = name_os.to_string_lossy();
+            if name.starts_with('.') { continue }              // hidden / dotfiles
+            let file_type = match entry.file_type() { Ok(t) => t, Err(_) => continue };
+            if !file_type.is_file() { continue }
+            let lower = name.to_lowercase();
+            let stem_end = if lower.ends_with(".sh")   { name.len().saturating_sub(3) }
+                else if lower.ends_with(".bash")        { name.len().saturating_sub(5) }
+                else if lower.ends_with(".zsh")         { name.len().saturating_sub(4) }
+                else { continue };
+            let stem = &name[..stem_end];
+            let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
+            let label = if prefix.is_empty() { stem.to_string() } else { format!("{}/{}", prefix, stem) };
+            out.push(ProjectCommand {
+                label,
+                // `bash ./X` works whether or not the script has the exec
+                // bit set — important because users coming in from
+                // Windows-ish remotes often have scripts that lost +x in
+                // transit.
+                command: format!("bash ./{}", rel),
+            });
+        }
+    }
+    let mut out: Vec<ProjectCommand> = Vec::new();
+    visit(root, "", &mut out);
+    visit(&root.join("scripts"), "scripts", &mut out);
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out.truncate(20);
+    out
 }
 
 #[tauri::command]
 pub fn detect_project(path: String) -> Result<ProjectInfo, String> {
     let p = std::path::Path::new(&path);
+
+    // ── Flutter — most specific, so detected first. `pubspec.yaml` is the
+    //    Dart/Flutter project manifest; we don't need to recurse.
+    if p.join("pubspec.yaml").exists() {
+        return Ok(ProjectInfo {
+            kind: "flutter".into(),
+            display: "Flutter".into(),
+            icon: "🦋".into(),
+            package_manager: "flutter".into(),
+            commands: vec![
+                ProjectCommand { label: "run".into(),      command: "flutter run".into() },
+                ProjectCommand { label: "test".into(),     command: "flutter test".into() },
+                ProjectCommand { label: "build apk".into(),command: "flutter build apk".into() },
+                ProjectCommand { label: "build ios".into(),command: "flutter build ios".into() },
+                ProjectCommand { label: "pub get".into(),  command: "flutter pub get".into() },
+                ProjectCommand { label: "clean".into(),    command: "flutter clean".into() },
+            ],
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
+
+    // ── Android — Gradle wrapper + an `app/` module. The combo is reliable
+    //    (root-only build.gradle could just be a generic Java/Kotlin lib).
+    let android_app_gradle = p.join("app/build.gradle").exists()
+        || p.join("app/build.gradle.kts").exists();
+    let has_gradlew = p.join("gradlew").exists();
+    if android_app_gradle && has_gradlew {
+        return Ok(ProjectInfo {
+            kind: "android".into(),
+            display: "Android".into(),
+            icon: "🤖".into(),
+            package_manager: "gradle".into(),
+            commands: vec![
+                ProjectCommand { label: "assemble debug".into(),   command: "./gradlew assembleDebug".into() },
+                ProjectCommand { label: "assemble release".into(), command: "./gradlew assembleRelease".into() },
+                ProjectCommand { label: "install debug".into(),    command: "./gradlew installDebug".into() },
+                ProjectCommand { label: "test".into(),             command: "./gradlew test".into() },
+                ProjectCommand { label: "lint".into(),             command: "./gradlew lint".into() },
+                ProjectCommand { label: "clean".into(),            command: "./gradlew clean".into() },
+            ],
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
+
+    // ── iOS / macOS Xcode — *.xcodeproj or *.xcworkspace at root, or a
+    //    Podfile (CocoaPods). Xcode workflow is mostly GUI-driven, so we
+    //    offer the few CLI affordances that are universally useful:
+    //    open in Xcode, list schemes, build, plus `pod install` when
+    //    appropriate.
+    let xcode_target = std::fs::read_dir(p).ok().and_then(|it| {
+        it.flatten().find_map(|e| {
+            let n = e.file_name();
+            let n_str = n.to_string_lossy();
+            if n_str.ends_with(".xcworkspace") || n_str.ends_with(".xcodeproj") {
+                Some(n_str.into_owned())
+            } else { None }
+        })
+    });
+    let has_podfile = p.join("Podfile").exists();
+    if xcode_target.is_some() || has_podfile {
+        let mut commands: Vec<ProjectCommand> = Vec::new();
+        if let Some(target) = xcode_target.as_ref() {
+            // Prefer .xcworkspace if both exist (CocoaPods-managed projects
+            // require the workspace).
+            commands.push(ProjectCommand { label: "open in Xcode".into(), command: format!("open '{}'", target) });
+            commands.push(ProjectCommand { label: "schemes".into(),       command: "xcodebuild -list".into() });
+            commands.push(ProjectCommand { label: "build".into(),         command: "xcodebuild build".into() });
+        }
+        if has_podfile {
+            commands.push(ProjectCommand { label: "pod install".into(),   command: "pod install".into() });
+            commands.push(ProjectCommand { label: "pod update".into(),    command: "pod update".into() });
+        }
+        return Ok(ProjectInfo {
+            kind: "ios".into(),
+            display: "iOS / Xcode".into(),
+            icon: "".into(),
+            package_manager: if has_podfile { "cocoapods".into() } else { "xcodebuild".into() },
+            commands,
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
 
     // ── Node.js — prefer this for hybrid projects (e.g. Tauri = Cargo.toml + package.json
     //    where the *entry point* is `npm run tauri dev`).
@@ -2113,6 +2272,7 @@ pub fn detect_project(path: String) -> Result<ProjectInfo, String> {
             icon: icon.into(),
             package_manager: pm.into(),
             commands,
+            shell_scripts: find_shell_scripts(p),
         });
     }
 
@@ -2129,6 +2289,7 @@ pub fn detect_project(path: String) -> Result<ProjectInfo, String> {
                 ProjectCommand { label: "test".into(),  command: "cargo test".into() },
                 ProjectCommand { label: "check".into(), command: "cargo check".into() },
             ],
+            shell_scripts: find_shell_scripts(p),
         });
     }
 
@@ -2144,15 +2305,119 @@ pub fn detect_project(path: String) -> Result<ProjectInfo, String> {
                 ProjectCommand { label: "build".into(), command: "go build ./...".into() },
                 ProjectCommand { label: "test".into(),  command: "go test ./...".into() },
             ],
+            shell_scripts: find_shell_scripts(p),
         });
     }
 
+    // ── Maven / Spring Boot — `pom.xml` is the marker. A quick substring
+    //    scan tells us if Spring Boot is present so we can surface
+    //    `mvn spring-boot:run` first; otherwise the generic Maven targets.
+    if p.join("pom.xml").exists() {
+        let is_spring = std::fs::read_to_string(p.join("pom.xml"))
+            .map(|s| s.contains("spring-boot"))
+            .unwrap_or(false);
+        let mut commands: Vec<ProjectCommand> = Vec::new();
+        if is_spring {
+            commands.push(ProjectCommand { label: "spring-boot:run".into(), command: "mvn spring-boot:run".into() });
+        }
+        commands.extend([
+            ProjectCommand { label: "compile".into(), command: "mvn compile".into() },
+            ProjectCommand { label: "test".into(),    command: "mvn test".into() },
+            ProjectCommand { label: "package".into(), command: "mvn package".into() },
+            ProjectCommand { label: "install".into(), command: "mvn install".into() },
+            ProjectCommand { label: "clean".into(),   command: "mvn clean".into() },
+        ]);
+        return Ok(ProjectInfo {
+            kind: "maven".into(),
+            display: if is_spring { "Spring Boot · Maven".into() } else { "Maven".into() },
+            icon: if is_spring { "🌱".into() } else { "🧰".into() },
+            package_manager: "maven".into(),
+            commands,
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
+
+    // ── Gradle (non-Android) — Java/Kotlin lib or backend. Detect Spring
+    //    Boot via build.gradle text so we lead with `bootRun` when that's
+    //    the right entry point.
+    let has_gradle_build = p.join("build.gradle").exists() || p.join("build.gradle.kts").exists();
+    if has_gradle_build {
+        let gradle_file = if p.join("build.gradle.kts").exists() { "build.gradle.kts" } else { "build.gradle" };
+        let body = std::fs::read_to_string(p.join(gradle_file)).unwrap_or_default();
+        let is_spring = body.contains("spring-boot");
+        let runner = if has_gradlew { "./gradlew" } else { "gradle" };
+        let mut commands: Vec<ProjectCommand> = Vec::new();
+        if is_spring {
+            commands.push(ProjectCommand { label: "bootRun".into(),    command: format!("{} bootRun", runner) });
+        }
+        commands.extend([
+            ProjectCommand { label: "build".into(), command: format!("{} build", runner) },
+            ProjectCommand { label: "test".into(),  command: format!("{} test", runner) },
+            ProjectCommand { label: "run".into(),   command: format!("{} run", runner) },
+            ProjectCommand { label: "clean".into(), command: format!("{} clean", runner) },
+        ]);
+        return Ok(ProjectInfo {
+            kind: "gradle".into(),
+            display: if is_spring { "Spring Boot · Gradle".into() } else { "Gradle".into() },
+            icon: if is_spring { "🌱".into() } else { "🐘".into() },
+            package_manager: "gradle".into(),
+            commands,
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
+
+    // ── Makefile — parse target names so the user can click them
+    //    directly instead of memorizing what's available. Cheap regex
+    //    over the file; up to 12 targets surfaced.
+    if p.join("Makefile").exists() || p.join("makefile").exists() {
+        let file = if p.join("Makefile").exists() { "Makefile" } else { "makefile" };
+        let body = std::fs::read_to_string(p.join(file)).unwrap_or_default();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut commands: Vec<ProjectCommand> = Vec::new();
+        for raw in body.lines() {
+            // Skip recipe lines (tab-indented) — they're commands, not rules.
+            if raw.starts_with('\t') || raw.starts_with(' ') { continue }
+            let line = raw.trim_start();
+            // Skip declarations like `.PHONY: build` (target starting with `.`).
+            if line.starts_with('.') { continue }
+            // Target name = chars up to `:`. Must be identifier-ish.
+            let colon = match line.find(':') { Some(i) => i, None => continue };
+            // `=` before `:` means assignment (`VAR = value`), not a rule.
+            if line[..colon].contains('=') { continue }
+            let name = line[..colon].trim();
+            if name.is_empty() { continue }
+            if !name.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false) { continue }
+            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') { continue }
+            if !seen.insert(name.to_string()) { continue }
+            commands.push(ProjectCommand {
+                label: name.to_string(),
+                command: format!("make {}", name),
+            });
+            if commands.len() >= 12 { break }
+        }
+        return Ok(ProjectInfo {
+            kind: "make".into(),
+            display: "Makefile".into(),
+            icon: "🛠️".into(),
+            package_manager: "make".into(),
+            commands,
+            shell_scripts: find_shell_scripts(p),
+        });
+    }
+
+    // No detected stack — still surface shell scripts if any. A repo
+    // with just a few `*.sh` files isn't "unknown" from the user's POV.
+    let shells = find_shell_scripts(p);
+    let kind = if shells.is_empty() { "unknown" } else { "shell" };
+    let display = if shells.is_empty() { "".into() } else { "Shell scripts".into() };
+    let icon = if shells.is_empty() { "".into() } else { "🐚".into() };
     Ok(ProjectInfo {
-        kind: "unknown".into(),
-        display: "".into(),
-        icon: "".into(),
+        kind: kind.into(),
+        display,
+        icon,
         package_manager: "".into(),
         commands: vec![],
+        shell_scripts: shells,
     })
 }
 

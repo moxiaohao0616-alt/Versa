@@ -417,7 +417,14 @@ body {
 /* Project runner — 2 columns of short pills */
 .rs-cmd-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Auto-fit columns based on the panel's current width. Each button
+   * needs ~120px to display its label readably; the grid fills as
+   * many of those tracks as fit, then redistributes leftover space
+   * via `1fr`. Drag the right panel wider → more columns; drag it
+   * narrower → fewer (down to 1). Way nicer than the previous
+   * fixed `1fr 1fr` which forced a 2-column layout regardless of
+   * how much room the user actually gave the panel. */
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 6px;
   margin-top: 4px;
 }
@@ -6349,3 +6356,26 @@ kbd {
   transition: opacity 0.1s;
 }
 .tree-folder:hover .tree-folder-count { opacity: 0.6; }
+
+/* Block label inside ProjectSection — separates the "Scripts" block
+ * (package-manager commands) from the "Shell scripts" block. Visual
+ * weight matches the rest of the right panel: subtle uppercase
+ * caption, no heavy ornament. */
+.rp-block-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text3, #999);
+  margin: 0 0 6px;
+}
+/* Shell-script buttons get a slightly different treatment so they
+ * read as "ad-hoc utility" rather than "the project's canonical run/
+ * build" — same shape, slightly muted accent + mono label. */
+.rs-cmd-btn-shell {
+  border-style: dashed !important;
+}
+.rs-cmd-btn-shell > span {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+}

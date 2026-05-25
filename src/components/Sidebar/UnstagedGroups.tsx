@@ -327,17 +327,27 @@ export function UnstagedGroups({
                       // future optimization if this gets slow.
                       paths.forEach(onStage)
                     }}
-                    onFolderDiscard={(paths) => {
+                    onFolderDiscard={async (paths) => {
                       const n = paths.length
-                      // Native confirm is enough for v1 — discarding N
-                      // files is destructive (working-tree edits gone)
-                      // so the user must explicitly say yes. A nicer
-                      // modal can replace this later.
                       if (!confirm(t('sidebar.discard_folder_confirm', {
                         count: n,
                         defaultValue: 'Discard changes in {{count}} file(s)? This cannot be undone.',
                       }))) return
-                      paths.forEach(onDiscard)
+                      if (!repoPath) return
+                      // Hit the Rust `discard_file` command directly for
+                      // every path, skipping the per-file modal flow
+                      // (which is single-target and would set/overwrite
+                      // its state N times, ending up as a one-file
+                      // prompt — that was the bug). Refresh once at the
+                      // end instead of after every file.
+                      try {
+                        for (const p of paths) {
+                          await invoke('discard_file', { path: repoPath, file: p })
+                        }
+                        await useStore.getState().refreshRepo()
+                      } catch (e) {
+                        useStore.getState().showToast(String(e), 'error')
+                      }
                     }}
                     isFolderDraggingPath={draggingFolder}
                     onFolderDragStart={(paths, e) => {

@@ -253,11 +253,19 @@ export interface ProjectCommand {
 }
 
 export interface ProjectInfo {
-  kind: 'node' | 'rust' | 'go' | 'unknown'
+  kind:
+    | 'node' | 'rust' | 'go'
+    | 'flutter' | 'android' | 'ios'
+    | 'maven' | 'gradle' | 'make'
+    | 'shell' | 'unknown'
   display: string
   icon: string
   packageManager: string
   commands: ProjectCommand[]
+  /** Raw shell scripts found in the repo root + `scripts/`. Rendered
+   *  in their own block under the package-manager scripts so the user
+   *  can tell `npm run dev` from `bash ./deploy.sh` at a glance. */
+  shellScripts: ProjectCommand[]
 }
 
 export interface BranchInfo {

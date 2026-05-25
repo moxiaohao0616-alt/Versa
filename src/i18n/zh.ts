@@ -888,6 +888,8 @@ export const zh = {
     dock_to_bottom: '停靠到底部',
     collapse: '收起面板',
     resize: '拖动调整宽度',
+    project_scripts: '项目脚本',
+    shell_scripts: 'Shell 脚本',
   },
 
   rightsidebar: {
