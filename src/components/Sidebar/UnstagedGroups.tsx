@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ChangedFile } from '../../store'
+import { invoke } from '@tauri-apps/api/core'
+import { useStore, type ChangedFile } from '../../store'
 import {
   DEFAULT_GROUP_ID,
   useChangelistStore,
@@ -52,6 +53,13 @@ export function UnstagedGroups({
   const { t } = useTranslation()
   const { groups, assignments, activeId, createGroup, deleteGroup, setActive, moveFiles } =
     useChangelistStore()
+  // Untracked empty dirs for the current repo — surfaced in the tree as
+  // folder leaves with the red N badge so newly-created empty folders
+  // (invisible to `git status`) still show up.
+  const repoPath = useStore(s => s.repoPath)
+  const emptyDirs = useStore(s =>
+    repoPath ? (s.untrackedEmptyDirsByRepo[repoPath] ?? []) : []
+  )
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -284,6 +292,53 @@ export function UnstagedGroups({
                     files={files}
                     renderFile={renderRow}
                     resetKey={resetKey}
+                    // Empty untracked dirs only belong in the default group —
+                    // they're not user-categorized work, just newly-created
+                    // folders git can't see. Custom changelists are about
+                    // *files the user moved into them*; an empty dir has
+                    // nothing to move.
+                    untrackedEmptyDirs={g.isDefault ? emptyDirs : undefined}
+                    onAddGitkeep={async (dirPath) => {
+                      if (!repoPath) return
+                      try {
+                        await invoke('add_gitkeep', { path: repoPath, dir: dirPath })
+                        // Watcher will refire — but force a refresh now so
+                        // the user sees the change immediately rather than
+                        // waiting for FSEvents debounce.
+                        useStore.getState().refreshRepo()
+                      } catch (e) {
+                        useStore.getState().showToast(String(e), 'error')
+                      }
+                    }}
+                    onRemoveEmptyDir={async (dirPath) => {
+                      if (!repoPath) return
+                      try {
+                        await invoke('remove_empty_dir', { path: repoPath, dir: dirPath })
+                        useStore.getState().refreshRepo()
+                      } catch (e) {
+                        useStore.getState().showToast(String(e), 'error')
+                      }
+                    }}
+                    onFolderStage={(paths) => {
+                      // Stage every descendant file. We iterate one-by-one
+                      // through the existing single-file stage action so
+                      // the changelist / per-file flow stays unchanged;
+                      // batching to a single `git add a b c …` call is a
+                      // future optimization if this gets slow.
+                      paths.forEach(onStage)
+                    }}
+                    onFolderDiscard={(paths) => {
+                      const n = paths.length
+                      // Native confirm is enough for v1 — discarding N
+                      // files is destructive (working-tree edits gone)
+                      // so the user must explicitly say yes. A nicer
+                      // modal can replace this later.
+                      if (!confirm(t('sidebar.discard_folder_confirm', {
+                        count: n,
+                        defaultValue: 'Discard changes in {{count}} file(s)? This cannot be undone.',
+                      }))) return
+                      paths.forEach(onDiscard)
+                    }}
                     isFolderDraggingPath={draggingFolder}
                     onFolderDragStart={(paths, e) => {
                       // Folder drag = move every descendant file together.
@@ -319,7 +374,7 @@ export function UnstagedGroups({
                   files.map(renderRow)
                 )
               })()}
-              {files.length === 0 && (
+              {files.length === 0 && !(g.isDefault && emptyDirs.length > 0) && (
                 <p
                   style={{
                     margin: '4px 8px',
@@ -496,7 +551,7 @@ function FileRow({
               onDiscard()
             }}
           >
-            <i className="ti ti-rotate" />
+            <i className="ti ti-arrow-back-up" />
           </button>
         )}
 

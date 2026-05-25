@@ -35,6 +35,12 @@ export function Sidebar() {
   const filesLoadPending = useStore(
     s => !!(s.repoPath && s.filesLoadPending[s.repoPath]),
   )
+  // Untracked empty dirs count against "is the working tree clean?" —
+  // a freshly-mkdir'd folder is a real intent to put work somewhere, so
+  // the "workspace clean" empty-state shouldn't paper over them.
+  const emptyDirsCount = useStore(
+    s => (s.repoPath ? (s.untrackedEmptyDirsByRepo[s.repoPath] ?? []).length : 0),
+  )
 
   const [stashOpen, setStashOpen] = useState(false)
   const [reflogOpen, setReflogOpen] = useState(false)
@@ -306,7 +312,7 @@ export function Sidebar() {
                       {f.unstagedStatus !== '?' && (
                         <button className="file-action-btn danger" title={t('sidebar.discard')}
                           onClick={e => { e.stopPropagation(); setDiscardTarget(f.path) }}>
-                          <i className="ti ti-rotate" />
+                          <i className="ti ti-arrow-back-up" />
                         </button>
                       )}
                     </div>
@@ -323,13 +329,13 @@ export function Sidebar() {
               hairline progress bar between TabStrip and SubRepoStrip,
               driven globally by `loading` + `filesLoadPending` +
               `submoduleCheckPending` in App.tsx. */}
-          {files.length === 0 && !submoduleCheckPending && !filesLoadPending ? (
+          {files.length === 0 && emptyDirsCount === 0 && !submoduleCheckPending && !filesLoadPending ? (
             <div className="empty-state center" style={{ flex: 1 }}>
               <i className="ti ti-circle-check" style={{ fontSize: 36, opacity: 0.15 }} />
               <p>{t('sidebar.workspace_clean')}</p>
               <span style={{ fontSize: 12 }}>{t('sidebar.workspace_clean_sub')}</span>
             </div>
-          ) : files.length === 0 ? <div style={{ flex: 1 }} /> : (
+          ) : files.length === 0 && emptyDirsCount === 0 ? <div style={{ flex: 1 }} /> : (
             <>
               {stagedFiles.length > 0 && (() => {
                 // Inline renderer reused for both flat .map and tree mode.

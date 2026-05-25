@@ -154,6 +154,20 @@ body {
   grid-template-columns: 52px 300px 1fr;
   overflow: hidden;
 }
+/* Right side is now a 2-column appendage: an always-visible icon strip
+ * (right-most), plus an expandable content column (just left of the
+ * strip). `minmax(0, ...)` on the flexible tracks lets them actually
+ * shrink to 0 when the window is narrow — without it, `1fr` has an
+ * implicit min of `min-content` so the row total stays wider than the
+ * window and `overflow: hidden` on .app-body clips the rightmost
+ * column (the strip itself) off-screen. */
+.app-body.has-right-strip {
+  grid-template-columns: 52px 300px minmax(0, 1fr) 36px;
+}
+.app-body.has-right-strip.has-right-open {
+  grid-template-columns: 52px 300px minmax(0, 1fr) minmax(0, var(--right-panel-width, 320px)) 36px;
+}
+/* Legacy alias — older Conflict view code paths still apply .has-right. */
 .app-body.has-right {
   grid-template-columns: 52px 300px 1fr 320px;
 }
@@ -669,6 +683,27 @@ body {
 }
 .badge.warn { background: var(--amber-bg); color: var(--amber-text); }
 
+/* Inside an icon-only button (pull / stash etc.) the inline badge would
+ * widen the button and crowd the action row when push *also* has its
+ * ahead-count "1" visible. Anchor it to the top-right corner instead so
+ * the button stays a fixed-width 32px square no matter the count. */
+.btn-icon > .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  margin-left: 0;
+  padding: 0 4px;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 9px;
+  border-radius: 7px;
+  text-align: center;
+  /* Tiny rim using the surrounding bg makes the badge pop against the
+   * icon's border without needing a separate shadow. */
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+
 .section-label {
   font-size: 11px; color: var(--text3);
   padding: 10px 14px 4px;
@@ -679,10 +714,23 @@ body {
 
 .file-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; border-radius: 6px; cursor: pointer;
+  /* 4px matches the new folder-row rhythm — tight enough to fit a
+   * long list without feeling like a card-stack, loose enough to give
+   * adjacent rows a perceptible gap. The action group is absolutely
+   * positioned (see .file-actions below) so its 26px buttons don't
+   * dictate row height. */
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
 }
 .file-item:hover { background: var(--bg2); }
 .file-item:hover .file-actions { opacity: 1; }
+/* Tree folder rows host the same `.file-actions` group on the untracked-
+ * empty variant (+ / trash). They live in .tree-folder, not .file-item,
+ * so the hover-fade-in needs its own selector. Without this rule the
+ * buttons rendered but stayed at opacity:0 forever. */
+.tree-folder:hover .file-actions { opacity: 1; }
 .file-item.selected { background: var(--bg2); }
 
 .fbadge {
@@ -694,13 +742,14 @@ body {
 .status-A { background: var(--green-bg); color: var(--green-text); }
 .status-D { background: var(--red-bg); color: var(--red-text); }
 .status-C { background: var(--amber-bg); color: var(--amber-text); }
-/* New / untracked entries — a solid red "N" badge so they stand out
-   from the "modified / added / deleted" categories. Using solid red on
-   white text instead of the soft tinted palette because "untracked"
-   is the most attention-worthy state on a fresh repo. */
+/* Untracked "N" — same soft red palette as the D (deleted) badge so it
+ * carries the same visual weight as M / A / D. We previously used a
+ * solid dark-red fill to "stand out" but in a list of mixed badges that
+ * made N feel like a different *kind* of thing rather than another
+ * status, and broke the eye's column alignment with neighbor rows. */
 .status-untracked {
-  background: var(--red-text);
-  color: #fff;
+  background: var(--red-bg);
+  color: var(--red-text);
 }
 .status-all { background: var(--bg2); color: var(--text2); }
 .status-all .ti { font-size: 11px; }
@@ -712,12 +761,32 @@ body {
 .file-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-path { display: block; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.file-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.1s; }
-.file-action-btn {
-  width: 22px; height: 22px; border-radius: 4px;
-  border: none; background: transparent; color: var(--text3);
-  cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center;
+.file-actions {
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  /* Floated over the row's right edge instead of laid out in flow so the
+   * 26px button height doesn't pad the row to ~36px tall — file rows
+   * now hug their badge+name and overall list density matches the
+   * compressed folder rows. The buttons still appear on hover at the
+   * right side, just without stretching the row. */
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: inherit;
 }
+.file-action-btn {
+  /* Slightly larger button + icon — previous 22px / 13px read as
+   * cramped next to the file name when the discard icon was a busy
+   * curved arrow. New icon (ti-arrow-back-up) is cleaner and benefits
+   * from the breathing room. */
+  width: 26px; height: 26px; border-radius: 4px;
+  border: none; background: transparent; color: var(--text3);
+  cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+}
+.file-action-btn > .ti { font-size: 16px; }
 .file-action-btn:hover { background: var(--bg3); color: var(--text); }
 .file-action-btn.danger:hover { color: var(--red-text); }
 
@@ -4857,8 +4926,14 @@ kbd {
 
 .branch-row {
   display: grid;
-  /* icon | name | upstream | counts | last-subject | meta(sha+time+kebab) */
-  grid-template-columns: 16px minmax(140px, 200px) minmax(0, 220px) 56px minmax(0, 1fr) auto;
+  /* icon | name | upstream | counts | last-subject | meta(sha+time+actions)
+     The name column was previously capped at 200px which truncated long
+     `feature/super-descriptive-name` style branches. Now it's a flexible
+     1fr that grows as wide as the available row space; only the last-
+     subject (1fr) shrinks first when both are long. The browser tooltip
+     on hover (.branch-name [title]) is the safety net for cases where
+     the row truly can't fit the full name. */
+  grid-template-columns: 16px minmax(180px, 1.4fr) minmax(0, 0.8fr) 56px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 6px 6px;
@@ -4911,10 +4986,12 @@ kbd {
   text-overflow: ellipsis;
 }
 .branch-meta {
-  /* Inner sub-grid so sha / time / kebab line up across rows,
-     regardless of whether the kebab is rendered for that row. */
+  /* Inner sub-grid so sha / time / actions line up across rows, even
+     for the current-branch row that doesn't get an actions cell. The
+     action cell is now wider since it hosts 3 inline buttons instead
+     of a single kebab toggle. */
   display: inline-grid;
-  grid-template-columns: 60px 64px 22px;
+  grid-template-columns: 60px 64px 84px;
   align-items: center;
   gap: 10px;
   font-size: 11px;
@@ -6023,3 +6100,252 @@ kbd {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* ============================================================
+ * RightPanel — dockable secondary side bar (project / explain /
+ * stash + agent / terminal sessions). Replaces the old RightSidebar.
+ * Lives in the last two grid columns of .app-body: a wider content
+ * column on the LEFT (only when open) and a slim icon strip on the
+ * RIGHT (whenever any section is docked right).
+ * ============================================================ */
+.right-panel-content {
+  /* Grid auto-places this into the 4th column of has-right-open. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+  border-left: 0.5px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.right-panel-resize {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 4px;
+  cursor: col-resize;
+  user-select: none;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 2;
+}
+.right-panel-resize:hover,
+.right-panel-resize.is-dragging {
+  background: color-mix(in srgb, var(--green) 30%, transparent);
+}
+.right-panel-header {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--bg2);
+  font-size: 12px;
+}
+.right-panel-header-icon { font-size: 14px; opacity: 0.7; color: var(--green); }
+.right-panel-header-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.right-panel-header-actions { display: flex; gap: 2px; }
+.right-panel-header-btn {
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text2);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.right-panel-header-btn:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--text);
+}
+.right-panel-header-btn > .ti { font-size: 14px; }
+.right-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;   /* TerminalPane fits to this; tool sections handle their own scroll */
+}
+
+/* Tool-section content (inherit some style from old RightSidebar cards) */
+.rp-section-body {
+  height: 100%;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.rp-section-subtitle {
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right edge icon strip — always visible when any section is docked
+ * right, even with the panel collapsed. Mirrors the left icon-bar but
+ * narrower because it doesn't carry top-level navigation. */
+.right-panel-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  gap: 2px;
+  /* SAME look whether the panel is open or closed. Previously the bg
+   * was `var(--bg2)` (#f5f5f3 in light mode), which read fine sitting
+   * against the OS chrome on the right edge — but with the panel open
+   * its left neighbor is the white panel content area, and the tiny
+   * #fff→#f5f5f3 step disappeared. The fix is just a higher-contrast
+   * fill plus a 1px left border so the rail is visibly its own surface
+   * in both states. */
+  background: color-mix(in srgb, var(--fg) 7%, var(--bg));
+  border-left: 1px solid var(--border);
+  min-width: 0;
+  overflow-y: auto;
+  /* Defensive: ensure the nav fills its grid cell (grid items default
+   * to stretch but some browsers fold flex columns down to content
+   * width) AND paints in front of any sibling that might bleed over. */
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+.right-panel-strip-btn {
+  width: 28px; height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text2);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+.right-panel-strip-btn:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--text);
+}
+.right-panel-strip-btn.active {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+}
+/* The previous left-accent bar (`::before` at left:-4px) dangled outside
+ * the button toward the panel-content edge. On the right-edge strip
+ * that read as a floating green line disconnected from any icon. The
+ * green pill background alone is enough to show "this section is open"
+ * without that extra ornament. */
+.right-panel-strip-btn > .ti { font-size: 14px; }
+
+/* Right-panel launcher menu — same dropdown as Terminal's agent menu but
+ * positioned to pop UP-AND-LEFT from a button on the right edge of the
+ * window instead of UP from a button at the bottom. We anchor at the
+ * button's top-left and grow leftward via translateX(-100%); the base
+ * class's translateY(-100%) is cleared so the menu sits below-left of
+ * the icon rather than above it. */
+.rp-launcher-menu {
+  transform: translateX(-100%) !important;
+}
+
+/* The permanent launcher icon is conceptually an ACTION button (click to
+ * pick an agent), not a section toggle. Mark it visibly distinct from
+ * the session/tool icons below:
+ *   - filled green pill background (always on, not just on hover)
+ *   - slightly larger icon glyph
+ *   - explicit gap + hairline separator under it so the dynamic icons
+ *     below read as a separate row. */
+.right-panel-strip-launcher {
+  width: 32px; height: 32px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  /* Tight to the agent sessions that follow it (they're conceptually the
+   * same "agent stuff" group). The visual break before the next group is
+   * the .right-panel-strip-divider element, not a launcher pseudo-line. */
+  margin: 2px 0 2px;
+}
+.right-panel-strip-launcher:hover {
+  background: color-mix(in srgb, var(--green) 22%, transparent);
+  color: var(--green);
+}
+.right-panel-strip-launcher > .ti { font-size: 18px; }
+
+/* Explicit divider between the agent-stuff group (launcher + opened agent
+ * sessions) above and the "everything else" group (tool sections, any
+ * right-docked shell terminals) below. */
+.right-panel-strip-divider {
+  width: 24px;
+  height: 1px;
+  margin: 8px auto;
+  background: var(--border);
+}
+/* Active state (menu open) — strengthened green pill, not the section
+ * "active" green left-accent bar (the launcher isn't a section). */
+.right-panel-strip-launcher.active {
+  background: color-mix(in srgb, var(--green) 30%, transparent);
+  color: var(--green);
+}
+.right-panel-strip-launcher.active::before {
+  display: none;
+}
+
+/* Inline branch action buttons (replace the old kebab-collapsed menu).
+ * Always visible per row — user explicitly wanted them not hidden behind
+ * a dropdown. Compact icon-only style so 3 buttons fit the 84px slot.
+ * Lives inside .branch-meta's last sub-grid cell. */
+.branch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-content: flex-end;
+}
+.branch-action-btn {
+  width: 24px; height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text2);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+.branch-action-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--text);
+}
+.branch-action-btn.danger:hover {
+  color: #C0392B;
+  background: color-mix(in srgb, #C0392B 12%, transparent);
+}
+.branch-action-btn > .ti { font-size: 13px; }
+/* Make the buttons pop more once the user hovers the row, so the whole
+ * group of inline icons reads as a clear "this row has actions" affordance
+ * without being noisy across 50 rows at rest. */
+.branch-row:hover .branch-action-btn { opacity: 0.85; }
+.branch-row:hover .branch-action-btn:hover { opacity: 1; }
+
+/* Folder count chip — shown at rest next to the (hidden) action group.
+ * Visible always so the user knows how many files live in the folder,
+ * and the action buttons fade in only on hover. On hover we tone it
+ * down so the buttons read as the active affordance. */
+.tree-folder-count {
+  font-size: 11px;
+  color: var(--text3, #999);
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+.tree-folder:hover .tree-folder-count { opacity: 0.6; }

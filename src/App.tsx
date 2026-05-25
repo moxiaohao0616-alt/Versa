@@ -20,7 +20,7 @@ import { RepoPalette } from './components/RepoPalette'
 import { SubRepoStrip } from './components/SubRepoStrip'
 import { WorkspaceOverview } from './components/WorkspaceOverview'
 import { BisectBanner } from './components/Bisect'
-import { RightSidebar } from './components/RightSidebar'
+import { RightPanel } from './components/RightPanel'
 import { BranchSwitcher } from './components/BranchSwitcher'
 import { CheatsheetModal } from './components/Cheatsheet'
 import { AboutModal } from './components/About'
@@ -31,6 +31,9 @@ import './styles/app.css'
 export default function App() {
   const { t } = useTranslation()
   const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, toggleRightSidebar, tabs, setWorkspaceView } = useStore()
+  // Subscribed so the grid template var below re-renders when the user
+  // drags the right panel's resize handle.
+  const rightPanelWidth = useStore(s => s.rightPanel.width)
   // The hairline progress bar lights up whenever anything async is in
   // flight for the current repo: a cold-path switch, the regular file
   // list load (step 2), or the per-submodule dirty scan (step 3).
@@ -118,6 +121,22 @@ export default function App() {
       if (e.key.toLowerCase() === 'f' && e.shiftKey && !e.altKey) {
         e.preventDefault()
         setSearchOpen(true)
+        return
+      }
+      // ⌘1 … ⌘9 — jump straight to the Nth open repo tab. Mirrors the
+      // pattern of VS Code / Chrome / Slack, so muscle memory carries over.
+      // No isEditableTarget guard: the modifier key being held makes this
+      // an unambiguous global shortcut, just like ⌘W / ⌘P — and without
+      // this xterm-hosted agent sessions would swallow it because xterm
+      // backs input with a hidden textarea (target would look editable).
+      // Skipped only when Shift is held — that combination is reserved
+      // for future per-pane shortcuts.
+      if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        const n = Number(e.key) - 1
+        if (n < s.tabs.length) {
+          e.preventDefault()
+          s.switchTab(s.tabs[n].root)
+        }
         return
       }
       // ⌘⇧] / ⌘⇧[ — next / previous workspace tab
@@ -435,9 +454,18 @@ export default function App() {
               && activeTab !== 'branches'
               && activeTab !== 'history'
               && activeTab !== 'compare'
-            const rsVisible = rightSidebarOpen && inNormalView
+            // RightPanel decides internally whether its content + icon-strip
+            // should render (it shows the strip whenever ANY section is
+            // docked right, content only when open). We just gate it to the
+            // "normal" working views, and key the grid template to whether
+            // the panel content is currently expanded.
+            const rsVisible = inNormalView
+            const rsExpanded = rsVisible && rightSidebarOpen
             return (
-          <div className={`app-body ${rsVisible ? 'has-right' : ''}`}>
+          <div
+            className={`app-body${rsVisible ? ' has-right-strip' : ''}${rsExpanded ? ' has-right-open' : ''}`}
+            style={rsExpanded ? ({ ['--right-panel-width' as any]: `${rightPanelWidth}px` }) : undefined}
+          >
             <nav className="icon-bar">
               <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
@@ -512,7 +540,7 @@ export default function App() {
                       : activeTab === 'search' ? <SearchPanel />
                       : <DiffView />}
                   </main>
-                  {rsVisible && <RightSidebar />}
+                  {rsVisible && <RightPanel />}
                 </>
               )
             })()}

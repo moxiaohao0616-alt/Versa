@@ -582,6 +582,19 @@ async function loadRepoStatusInTwoSteps(
       })
       console.log(`[load] step2 files (no submodules): ${(performance.now() - t1).toFixed(1)}ms — ${files.length} entries`)
       setRepoStatus({ ...quick, files })
+      // Step 2b: untracked empty dirs. Git itself can't see them (empty
+      // dirs aren't a thing in its index), so we walk the working tree
+      // from Rust. Stored in a separate per-repo map so the slower
+      // step-3 submodule status update can't clobber it; the sidebar
+      // joins file list + empty-dirs at render time.
+      void (async () => {
+        try {
+          const emptyDirs = await invoke<string[]>('list_untracked_empty_dirs', { path })
+          useStore.setState(s => ({
+            untrackedEmptyDirsByRepo: { ...s.untrackedEmptyDirsByRepo, [path]: emptyDirs },
+          }))
+        } catch { /* non-fatal */ }
+      })()
       // Step 2 done — file list is now authoritative (except for
       // submodule dirty entries which arrive in step 3).
       useStore.setState(s => {
@@ -641,6 +654,24 @@ async function loadRepoStatusInTwoSteps(
  *  — OR whose `root` equals `repoPath`, which is the empty-workspace case
  *  where the tab has no git repos yet and we use the picked folder path
  *  itself as the activeRepo placeholder. */
+/** Where a section lives when the user hasn't overridden it.
+ *  - Tool cards (project/explain/stash) → right (they were the original
+ *    right-aux-panel content).
+ *  - Terminal sessions: shell tabs → bottom (preserves the existing UX);
+ *    agent sessions (Claude / Codex) → right, because long AI chats want
+ *    vertical screen real-estate. */
+export function defaultDockFor(sectionId: string, s: { terminalsByRepo: Record<string, TermSession[]> }): 'right' | 'bottom' {
+  if (sectionId.startsWith('terminal:')) {
+    const id = sectionId.slice('terminal:'.length)
+    for (const list of Object.values(s.terminalsByRepo)) {
+      const sess = list.find(t => t.id === id)
+      if (sess) return sess.agentId ? 'right' : 'bottom'
+    }
+    return 'bottom'
+  }
+  return 'right'
+}
+
 function findWorkspaceFor(tabs: WorkspaceTab[], repoPath: string | null): WorkspaceTab | null {
   if (!repoPath) return null
   return tabs.find(t =>
@@ -735,6 +766,32 @@ interface VersaState {
 
   // UI
   activeTab: 'changes' | 'history' | 'branches' | 'compare' | 'search'
+
+  // Dockable panels — sections (tool cards, terminal sessions) can live on
+  // the right or at the bottom. Each panel is independently open/sized.
+  //
+  // Section id namespace:
+  //   - 'project' | 'explain' | 'stash'     ← the three aux cards
+  //   - `terminal:${sessionId}`             ← per-PTY session
+  //
+  // sectionDock stores **overrides** from defaults — missing key falls back
+  // to: tool cards → 'right', terminal sessions → 'right' if it's an agent
+  // tab, otherwise 'bottom'. Sparse so the persisted JSON stays small.
+  /** Right panel: open/width are global, but the active section is
+   *  PER-REPO. Each repo remembers what its right panel was showing
+   *  last, so switching repos away and back snaps the panel back to
+   *  the same agent / tool view the user left there. */
+  rightPanel: {
+    open: boolean
+    width: number
+    activeByRepo: Record<string, string | null>
+  }
+  bottomPanel: { open: boolean; activeSection: string | null; height: number }
+  sectionDock: Record<string, 'right' | 'bottom'>
+
+  // Back-compat shim: kept readable as a derived boolean for old call sites
+  // (e.g., loops that flip `terminalOpen`). New code should read bottomPanel
+  // / rightPanel directly. Setters below keep both in sync.
   terminalOpen: boolean
   // Per-repo terminal sessions. Each repo keeps its own list of PTY tabs
   // alive across repo switches; switching back restores whatever was
@@ -798,7 +855,10 @@ interface VersaState {
 
   // App-level settings persisted to localStorage
   graphLoadStep: number    // how many commits "再加载" pulls each click
-  rightSidebarOpen: boolean // right-side aux panel (project runner / AI explain / stash)
+  /** Back-compat alias derived from rightPanel.open — kept so old call
+   *  sites (`s.rightSidebarOpen`) keep compiling while the migration to
+   *  the new dockable-panel model rolls out. New code: read rightPanel. */
+  rightSidebarOpen: boolean
   gpgSign: boolean         // sign commits (-S); relies on user's git signing config
   diffIgnoreWhitespace: boolean   // pass `ignore_whitespace=true` to get_diff
   diffWordLevel: boolean   // show inline word-level highlight inside changed lines
@@ -815,6 +875,13 @@ interface VersaState {
   // shows a "loading files…" banner so the empty interval before data
   // arrives doesn't look like an inert "clean working tree" state.
   filesLoadPending: Record<string, boolean>
+  /** Per-repo list of untracked empty directories — git itself can't
+   *  surface these (it only tracks files), so we walk the working tree
+   *  from Rust after the regular status loads. Rendered in the unstaged
+   *  tree as folder nodes carrying the red N badge. Sparse: a missing
+   *  key means "not computed yet for this repo"; an empty array means
+   *  "computed, none found". */
+  untrackedEmptyDirsByRepo: Record<string, string[]>
 
   // Repos whose step-3 submodule dirty check is currently in flight.
   // Keyed by repo path. Sidebar reads this to render a "checking submodules…"
@@ -919,6 +986,22 @@ interface VersaState {
   setGraphSelected: (id: string | null) => void
   setGraphLoadStep: (n: number) => void
   toggleRightSidebar: () => void
+
+  /** Open or close a panel without changing its active section. */
+  setPanelOpen: (panel: 'right' | 'bottom', open: boolean) => void
+  /** Set the active section for a panel; opens it as a side effect. */
+  setPanelActiveSection: (panel: 'right' | 'bottom', sectionId: string | null) => void
+  /** Persist a new size for a panel (debounced internally via localStorage). */
+  setPanelSize: (panel: 'right' | 'bottom', size: number) => void
+  /** Move a section between docks. If the section is currently active in its
+   *  old panel and that panel goes empty, the panel closes; otherwise its
+   *  active section advances to a sibling. The destination panel opens with
+   *  the moved section activated. */
+  setSectionDock: (sectionId: string, dock: 'right' | 'bottom') => void
+  /** Convenience: focus a section in whichever panel hosts it. If the
+   *  section is already active in an open panel, this toggles the panel. */
+  activateSection: (sectionId: string) => void
+
   setGpgSign: (on: boolean) => void
   setDiffIgnoreWhitespace: (on: boolean) => void
   setDiffWordLevel: (on: boolean) => void
@@ -1004,7 +1087,30 @@ export const useStore = create<VersaState>((set, get) => ({
   graphLoading: false,
   graphSelected: null,
   graphLoadStep: Number(localStorage.getItem('versa:graphLoadStep') || 200),
-  rightSidebarOpen: localStorage.getItem('versa:rightSidebarOpen') === '1',
+  rightPanel: {
+    open: localStorage.getItem('versa:rightPanel:open') === '1',
+    // Default 320px so the project-runner card has room without dominating
+    // the main view. Clamped to [220, 60% of window] when the user drags.
+    width: Number(localStorage.getItem('versa:rightPanel:width') || 320),
+    activeByRepo: (() => {
+      try { return JSON.parse(localStorage.getItem('versa:rightPanel:activeByRepo') || '{}') }
+      catch { return {} }
+    })(),
+  },
+  bottomPanel: {
+    // Match the legacy `terminalOpen` flag so existing users who closed the
+    // terminal panel before this version don't see it pop open at launch.
+    open: localStorage.getItem('versa:bottomPanel:open') === '1',
+    activeSection: localStorage.getItem('versa:bottomPanel:activeSection') || null,
+    height: Number(localStorage.getItem('versa:bottomPanel:height') || 280),
+  },
+  sectionDock: (() => {
+    try { return JSON.parse(localStorage.getItem('versa:sectionDock') || '{}') }
+    catch { return {} }
+  })(),
+  // Derived; kept in sync by the panel actions below. Initial value mirrors
+  // bottomPanel.open / rightPanel.open for back-compat consumers.
+  rightSidebarOpen: localStorage.getItem('versa:rightPanel:open') === '1',
   gpgSign: localStorage.getItem('versa:gpgSign') === '1',
   diffIgnoreWhitespace: localStorage.getItem('versa:diffIgnoreWhitespace') === '1',
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
@@ -1016,6 +1122,7 @@ export const useStore = create<VersaState>((set, get) => ({
   })(),
   repoListCollapsed: localStorage.getItem('versa:repoListCollapsed') === '1',
   filesLoadPending: {},
+  untrackedEmptyDirsByRepo: {},
   submoduleCheckPending: {},
   bisectStatus: null,
   currentAiStreamId: null,
@@ -1028,7 +1135,10 @@ export const useStore = create<VersaState>((set, get) => ({
   commits: [],
   recentRepos: JSON.parse(localStorage.getItem('versa:recentRepos') || '[]'),
   activeTab: 'changes',
-  terminalOpen: false,
+  // Mirrors bottomPanel.open at startup. Keeps existing call sites that
+  // read `terminalOpen` working without forcing every consumer to migrate
+  // on the same commit. See [[ux-docked-right-panel]] for the plan.
+  terminalOpen: localStorage.getItem('versa:bottomPanel:open') === '1',
   terminalsByRepo: {},
   activeTerminalByRepo: {},
   commitMessage: '',
@@ -2202,7 +2312,11 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   sendToTerminal: (cmd: string) => {
-    set({ pendingTerminalCommand: cmd, terminalOpen: true })
+    // Open the bottom panel so the user actually sees their command land —
+    // sendToTerminal is fire-and-forget from a button (project runner) and
+    // gets confusing if the panel were collapsed at the time.
+    set({ pendingTerminalCommand: cmd })
+    get().setPanelOpen('bottom', true)
   },
 
   consumeTerminalCommand: () => set({ pendingTerminalCommand: null }),
@@ -2261,9 +2375,120 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   toggleRightSidebar: () => {
-    const next = !get().rightSidebarOpen
-    localStorage.setItem('versa:rightSidebarOpen', next ? '1' : '0')
-    set({ rightSidebarOpen: next })
+    // Back-compat: route through the new panel state so the rightSidebarOpen
+    // alias stays consistent. Old callers (icon-bar's "layout-sidebar-right"
+    // button) effectively just toggle the right panel.
+    const s = get()
+    s.setPanelOpen('right', !s.rightPanel.open)
+  },
+
+  setPanelOpen: (panel, open) => {
+    set(s => {
+      const which = panel === 'right' ? 'rightPanel' : 'bottomPanel'
+      const next = { ...s[which], open }
+      localStorage.setItem(`versa:${which}:open`, open ? '1' : '0')
+      const patch: Partial<VersaState> = { [which]: next } as any
+      if (panel === 'right') patch.rightSidebarOpen = open
+      if (panel === 'bottom') patch.terminalOpen = open
+      return patch
+    })
+  },
+
+  setPanelActiveSection: (panel, sectionId) => {
+    set(s => {
+      // Right panel scopes activeSection per-repo so each repo restores
+      // its own last-viewed section when the user comes back. Bottom
+      // panel still has a single activeSection (used rarely — bottom
+      // mostly hosts the per-repo terminal-tab strip directly).
+      if (panel === 'right') {
+        const repoKey = s.repoPath || '__none__'
+        const activeByRepo = { ...s.rightPanel.activeByRepo, [repoKey]: sectionId }
+        if (!sectionId) delete activeByRepo[repoKey]
+        const open = sectionId ? true : s.rightPanel.open
+        localStorage.setItem('versa:rightPanel:activeByRepo', JSON.stringify(activeByRepo))
+        if (open) localStorage.setItem('versa:rightPanel:open', '1')
+        return {
+          rightPanel: { ...s.rightPanel, activeByRepo, open },
+          rightSidebarOpen: open,
+        }
+      }
+      const next = { ...s.bottomPanel, activeSection: sectionId, open: sectionId ? true : s.bottomPanel.open }
+      if (sectionId) localStorage.setItem('versa:bottomPanel:activeSection', sectionId)
+      else localStorage.removeItem('versa:bottomPanel:activeSection')
+      if (next.open) localStorage.setItem('versa:bottomPanel:open', '1')
+      return { bottomPanel: next, terminalOpen: next.open }
+    })
+  },
+
+  setPanelSize: (panel, size) => {
+    set(s => {
+      const which = panel === 'right' ? 'rightPanel' : 'bottomPanel'
+      const key = panel === 'right' ? 'width' : 'height'
+      const clamped = Math.max(220, size)
+      const next = { ...s[which], [key]: clamped }
+      localStorage.setItem(`versa:${which}:${key}`, String(clamped))
+      return { [which]: next } as any
+    })
+  },
+
+  setSectionDock: (sectionId, dock) => {
+    set(s => {
+      const prevDock = s.sectionDock[sectionId] === dock
+      if (prevDock) return s
+      const nextMap = { ...s.sectionDock, [sectionId]: dock }
+      localStorage.setItem('versa:sectionDock', JSON.stringify(nextMap))
+      // Update active-section tracking for both panels: clear from the
+      // OLD panel where it was; set as active in the NEW panel.
+      const repoKey = s.repoPath || '__none__'
+      let nextRight = s.rightPanel
+      let nextBottom = s.bottomPanel
+      if (dock === 'right') {
+        // Moving to right: clear bottom's active if it pointed here.
+        if (nextBottom.activeSection === sectionId) {
+          nextBottom = { ...nextBottom, activeSection: null }
+          localStorage.removeItem('versa:bottomPanel:activeSection')
+        }
+        const activeByRepo = { ...nextRight.activeByRepo, [repoKey]: sectionId }
+        nextRight = { ...nextRight, activeByRepo, open: true }
+        localStorage.setItem('versa:rightPanel:activeByRepo', JSON.stringify(activeByRepo))
+        localStorage.setItem('versa:rightPanel:open', '1')
+      } else {
+        // Moving to bottom: clear right's per-repo active if it pointed here.
+        if (nextRight.activeByRepo[repoKey] === sectionId) {
+          const activeByRepo = { ...nextRight.activeByRepo }
+          delete activeByRepo[repoKey]
+          nextRight = { ...nextRight, activeByRepo }
+          localStorage.setItem('versa:rightPanel:activeByRepo', JSON.stringify(activeByRepo))
+        }
+        nextBottom = { ...nextBottom, activeSection: sectionId, open: true }
+        localStorage.setItem('versa:bottomPanel:activeSection', sectionId)
+        localStorage.setItem('versa:bottomPanel:open', '1')
+      }
+      return {
+        sectionDock: nextMap,
+        rightPanel: nextRight,
+        bottomPanel: nextBottom,
+        rightSidebarOpen: nextRight.open,
+        terminalOpen: nextBottom.open,
+      }
+    })
+  },
+
+  activateSection: (sectionId) => {
+    const s = get()
+    const dock = s.sectionDock[sectionId] ?? defaultDockFor(sectionId, s)
+    const panel = dock === 'right' ? 'right' : 'bottom'
+    const repoKey = s.repoPath || '__none__'
+    // For right panel, "is this already the active section?" is per-repo.
+    const currentActive = panel === 'right'
+      ? s.rightPanel.activeByRepo[repoKey] ?? null
+      : s.bottomPanel.activeSection
+    const isOpen = panel === 'right' ? s.rightPanel.open : s.bottomPanel.open
+    if (currentActive === sectionId && isOpen) {
+      s.setPanelOpen(panel, false)
+    } else {
+      s.setPanelActiveSection(panel, sectionId)
+    }
   },
 
   setGpgSign: (on) => {
@@ -2676,7 +2901,7 @@ export const useStore = create<VersaState>((set, get) => ({
     invoke('cancel_ai_stream', { streamId: id }).catch(() => {})
   },
   setTab: (tab) => set({ activeTab: tab }),
-  setTerminalOpen: (open) => set({ terminalOpen: open }),
+  setTerminalOpen: (open) => get().setPanelOpen('bottom', open),
 
   openNewTerminal: (repoPath) => {
     const id = `s${Math.random().toString(36).slice(2)}`
@@ -2713,6 +2938,11 @@ export const useStore = create<VersaState>((set, get) => ({
       terminalsByRepo: { ...get().terminalsByRepo, [repoPath]: [...prev, session] },
       activeTerminalByRepo: { ...get().activeTerminalByRepo, [repoPath]: id },
     })
+    // Surface the new agent immediately in whichever panel hosts it
+    // (agents default to the right; user can re-dock via section header).
+    // Without this the panel would stay collapsed and the user wouldn't
+    // see anything happen after picking the agent from the menu.
+    get().activateSection(`terminal:${id}`)
     return id
   },
 

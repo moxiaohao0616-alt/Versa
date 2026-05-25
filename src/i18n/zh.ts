@@ -222,6 +222,7 @@ export const zh = {
     discard_title: '放弃这个文件的改动？',
     discard_warn: '这会丢弃你对这个文件的所有未保存修改，此操作不可撤销。',
     discard_confirm: '确认放弃',
+    discard_folder_confirm: '要放弃这个文件夹下 {{count}} 个文件的修改吗？这一步无法撤销。',
     stage: '暂存',
     unstage: '取消暂存',
     discard: '忽略更改',
@@ -675,6 +676,7 @@ export const zh = {
     toggle_terminal: '切换 Terminal',
     close_tab: '关闭当前仓库 tab',
     next_tab: '切到下一个 tab',
+    nth_tab: '快速跳到第 N 个仓库（1–9）',
     prev_tab: '切到上一个 tab',
     search_diff: '在当前 diff 里搜文本',
     search_workspace: '在工作区里全文搜索',
@@ -876,6 +878,16 @@ export const zh = {
     agent_launcher: '打开 AI Agent',
     agent_menu_empty: '还没配置任何 agent',
     agent_menu_configure: '配置 agents…',
+    dock_to_right: '把当前会话放到右侧面板',
+  },
+
+  rightpanel: {
+    project: '项目',
+    explain: '解释这次提交',
+    explain_no_commit: '在历史视图里选一个提交，AI 会解释它。',
+    dock_to_bottom: '停靠到底部',
+    collapse: '收起面板',
+    resize: '拖动调整宽度',
   },
 
   rightsidebar: {

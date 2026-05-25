@@ -221,6 +221,7 @@ export const en: Translations = {
     discard_title: 'Discard changes to this file?',
     discard_warn: 'All unsaved changes to this file will be lost. This cannot be undone.',
     discard_confirm: 'Discard',
+    discard_folder_confirm: 'Discard changes in {{count}} file(s)? This cannot be undone.',
     stage: 'Stage',
     unstage: 'Unstage',
     discard: 'Discard',
@@ -674,6 +675,7 @@ export const en: Translations = {
     toggle_terminal: 'Toggle terminal',
     close_tab: 'Close current repo tab',
     next_tab: 'Next tab',
+    nth_tab: 'Jump to the N-th open repo (1–9)',
     prev_tab: 'Previous tab',
     search_diff: 'Search inside the diff',
     search_workspace: 'Search across all files in the workspace',
@@ -875,6 +877,16 @@ export const en: Translations = {
     agent_launcher: 'Launch an AI agent',
     agent_menu_empty: 'No agents configured yet',
     agent_menu_configure: 'Configure agents…',
+    dock_to_right: 'Move this session to the right panel',
+  },
+
+  rightpanel: {
+    project: 'Project',
+    explain: 'Explain commit',
+    explain_no_commit: 'Pick a commit in the history view to explain.',
+    dock_to_bottom: 'Dock to bottom',
+    collapse: 'Collapse panel',
+    resize: 'Drag to resize',
   },
 
   rightsidebar: {

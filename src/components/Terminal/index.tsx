@@ -6,8 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import '@xterm/xterm/css/xterm.css'
-import { useStore, type TermSession } from '../../store'
-import { useAgentStore } from '../../lib/agents'
+import { useStore, defaultDockFor, type TermSession } from '../../store'
 import { promoteAgentExitToChangelist } from '../../agents/lifecycle'
 
 /** Sessions we've already opened during this app run. Used to tell apart
@@ -107,58 +106,25 @@ export function Terminal() {
   const { t } = useTranslation()
   const repoPath = useStore((s) => s.repoPath)
   const setTerminalOpen = useStore((s) => s.setTerminalOpen)
-  const sessions = useStore((s) => (repoPath ? s.terminalsByRepo[repoPath] ?? [] : []))
-  const activeId = useStore((s) => (repoPath ? s.activeTerminalByRepo[repoPath] ?? null : null))
+  // Show only the sessions docked to the bottom — agent tabs default to
+  // the right panel now, and the user can move any session between sides
+  // via the section header toggle. The store's per-repo "activeTerminal"
+  // tracks the active *session*; we cap it to bottom-docked ones here.
+  const allSessions = useStore((s) => (repoPath ? s.terminalsByRepo[repoPath] ?? [] : []))
+  const sectionDock = useStore((s) => s.sectionDock)
+  const terminalsByRepo = useStore((s) => s.terminalsByRepo)
+  const sessions = allSessions.filter(s =>
+    (sectionDock[`terminal:${s.id}`] ?? defaultDockFor(`terminal:${s.id}`, { terminalsByRepo })) === 'bottom'
+  )
+  const rawActiveId = useStore((s) => (repoPath ? s.activeTerminalByRepo[repoPath] ?? null : null))
+  const activeId = sessions.some(s => s.id === rawActiveId) ? rawActiveId : (sessions[0]?.id ?? null)
   const openNewTerminal = useStore((s) => s.openNewTerminal)
-  const openAgentTerminal = useStore((s) => s.openAgentTerminal)
   const closeTerminal = useStore((s) => s.closeTerminal)
   const setActiveTerminal = useStore((s) => s.setActiveTerminal)
-  const agents = useAgentStore((s) => s.agents)
 
   const [panelHeight, setPanelHeight] = useState(280)
   const [dragging, setDragging] = useState(false)
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
-  /** Viewport-anchored position of the open menu — we render the popup with
-   *  `position: fixed` so `.terminal-panel { overflow: hidden }` can't clip
-   *  it. Recomputed every time the button is clicked. */
-  const [agentMenuPos, setAgentMenuPos] = useState<{ top: number; right: number }>({
-    top: 0,
-    right: 0,
-  })
-  const agentMenuButtonRef = useRef<HTMLButtonElement>(null)
-  const agentMenuRef = useRef<HTMLDivElement>(null)
   const dragState = useRef<{ startY: number; startH: number } | null>(null)
-
-  // Close the agent launcher menu on any click outside it (or its trigger
-  // button). Cheaper than a headless-ui popover.
-  useEffect(() => {
-    if (!agentMenuOpen) return
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (
-        !agentMenuRef.current?.contains(target) &&
-        !agentMenuButtonRef.current?.contains(target)
-      ) {
-        setAgentMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [agentMenuOpen])
-
-  const toggleAgentMenu = () => {
-    if (!agentMenuOpen && agentMenuButtonRef.current) {
-      const r = agentMenuButtonRef.current.getBoundingClientRect()
-      setAgentMenuPos({
-        // Pop upward: menu's bottom edge sits 6px above the button's top.
-        // CSS translates by -100% so the inline `top` value is the menu's
-        // future *bottom*.
-        top: r.top - 6,
-        right: window.innerWidth - r.right,
-      })
-    }
-    setAgentMenuOpen((v) => !v)
-  }
 
   // Auto-open the first tab when the panel comes up empty for this repo.
   // Without this, the panel renders a blank body with just "+" to click — a
@@ -172,8 +138,17 @@ export function Terminal() {
   // the live store and the second call short-circuits.
   useEffect(() => {
     if (!repoPath) return
-    const liveSessions = useStore.getState().terminalsByRepo[repoPath] ?? []
-    if (liveSessions.length === 0) {
+    // Only spawn a shell if the BOTTOM panel itself is empty for this repo.
+    // The previous check used the unfiltered session count, which broke
+    // after the right-panel split: a single Claude session on the right
+    // counted as "non-empty", so opening the bottom panel showed a blank
+    // body until the user manually clicked +.
+    const live = useStore.getState()
+    const liveSessions = live.terminalsByRepo[repoPath] ?? []
+    const hasBottomSession = liveSessions.some(s =>
+      (live.sectionDock[`terminal:${s.id}`] ?? defaultDockFor(`terminal:${s.id}`, live)) === 'bottom'
+    )
+    if (!hasBottomSession) {
       openNewTerminal(repoPath)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,6 +216,14 @@ export function Terminal() {
                   onClick={(e) => {
                     e.stopPropagation()
                     closeTerminal(repoPath, s.id)
+                    // Match the exit-handler behavior: closing the last
+                    // bottom tab via the × also collapses the panel.
+                    const live = useStore.getState()
+                    const remainingBottom = (live.terminalsByRepo[repoPath] ?? []).filter(x =>
+                      x.id !== s.id &&
+                      (live.sectionDock[`terminal:${x.id}`] ?? defaultDockFor(`terminal:${x.id}`, live)) === 'bottom'
+                    )
+                    if (remainingBottom.length === 0) live.setPanelOpen('bottom', false)
                   }}
                   title={t('common.close')}
                 >
@@ -260,61 +243,21 @@ export function Terminal() {
         </div>
         <span className="term-path">{repoPath}</span>
         <div className="term-actions">
-          {/* Agent launcher — collapsed into one button on the far right so the
-              tab strip stays focused on actual sessions, not creation knobs.
-              Click → dropdown of every configured agent + "Configure…". The
-              menu itself is portal-free `position: fixed` so the panel's
-              overflow:hidden doesn't crop it. */}
-          <button
-            ref={agentMenuButtonRef}
-            className="term-btn"
-            onClick={toggleAgentMenu}
-            title={t('terminal.agent_launcher')}
-            aria-haspopup="menu"
-            aria-expanded={agentMenuOpen}
-          >
-            <i className="ti ti-robot" />
-            <i className="ti ti-chevron-down" style={{ fontSize: 10, marginLeft: 2 }} />
-          </button>
-          {agentMenuOpen && (
-            <div
-              ref={agentMenuRef}
-              className="term-agent-menu"
-              role="menu"
-              style={{ top: agentMenuPos.top, right: agentMenuPos.right }}
+          {/* Agent launcher moved to the permanent first-position icon
+              in the right panel's strip — bottom panel no longer needs
+              its own; one entry point is less confusing. */}
+          {/* Dock the active session to the right panel — useful when a
+              long-running shell is doing AI-shaped work (claude code in a
+              regular shell, npm run dev with chatty output, etc.) and the
+              user wants the vertical space. */}
+          {activeId && (
+            <button
+              className="term-btn"
+              onClick={() => useStore.getState().setSectionDock(`terminal:${activeId}`, 'right')}
+              title={t('terminal.dock_to_right', 'Dock to right')}
             >
-              {agents.length === 0 ? (
-                <p className="term-agent-menu-empty">{t('terminal.agent_menu_empty')}</p>
-              ) : (
-                agents.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className="term-agent-menu-item"
-                    onClick={() => {
-                      openAgentTerminal(repoPath, a)
-                      setAgentMenuOpen(false)
-                    }}
-                    title={`${a.command} ${a.extraArgs}`.trim()}
-                  >
-                    <i className="ti ti-robot" />
-                    <span>{a.name}</span>
-                  </button>
-                ))
-              )}
-              <div className="term-agent-menu-sep" />
-              <button
-                type="button"
-                className="term-agent-menu-item term-agent-menu-config"
-                onClick={() => {
-                  setAgentMenuOpen(false)
-                  window.dispatchEvent(new CustomEvent('versa:nav-agents-settings'))
-                }}
-              >
-                <i className="ti ti-settings" />
-                <span>{t('terminal.agent_menu_configure')}</span>
-              </button>
-            </div>
+              <i className="ti ti-layout-sidebar-right" />
+            </button>
           )}
           <button
             className="term-btn"
@@ -373,7 +316,9 @@ export function Terminal() {
  * stream listeners. `isActive` controls whether pendingTerminalCommand
  * gets routed here.
  */
-function TerminalPane({
+// Exported so the RightPanel host can render the exact same xterm + PTY
+// wiring when a terminal session is docked to the right.
+export function TerminalPane({
   session,
   isActive,
   repoPath,
@@ -382,6 +327,9 @@ function TerminalPane({
   session: TermSession
   isActive: boolean
   repoPath: string
+  /** Size hint that triggers a fit() re-run when changed. The actual fit
+   *  comes from ResizeObserver, this is just a "panel resized, please
+   *  re-fit now" pulse. Width or height — whichever the host changes. */
   panelHeight: number
 }) {
   const theme = useStore((s) => s.theme)
@@ -492,9 +440,17 @@ function TerminalPane({
           // stale ctrl+L nudge.
           openedSessions.delete(session.id)
           store.closeTerminal(repo, session.id)
-          const remaining = useStore.getState().terminalsByRepo[repo] ?? []
-          if (remaining.length === 0) {
-            useStore.getState().setTerminalOpen(false)
+          // Auto-collapse the bottom panel when its LAST shell exits. We
+          // must filter by dock — an agent session on the right side
+          // doesn't count toward "is there still something to show at
+          // the bottom?"; before this filter, a Claude on the right kept
+          // the empty bottom panel pinned open.
+          const live = useStore.getState()
+          const remainingBottom = (live.terminalsByRepo[repo] ?? []).filter(s =>
+            (live.sectionDock[`terminal:${s.id}`] ?? defaultDockFor(`terminal:${s.id}`, live)) === 'bottom'
+          )
+          if (remainingBottom.length === 0) {
+            live.setPanelOpen('bottom', false)
           }
         }
       })

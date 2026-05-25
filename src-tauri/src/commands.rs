@@ -129,6 +129,9 @@ pub async fn get_changed_files_only(
     let repo = Repository::open(&path).map_err(fe)?;
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
+    // Mirror the shell-path's `--untracked-files=all` — list each file
+    // inside an untracked directory rather than the directory itself.
+    opts.recurse_untracked_dirs(true);
     if skip_submodule_dirty.unwrap_or(false) {
         opts.exclude_submodules(true);
     }
@@ -153,7 +156,14 @@ async fn git_status_via_shell(cwd: &str) -> Result<Vec<ChangedFile>, String> {
             "--porcelain=v1",
             "-z",
             "--ignore-submodules=all",
-            "--untracked-files=normal",
+            // `=all` (vs the default `=normal`) reports each file inside an
+            // untracked directory individually, instead of collapsing the
+            // whole dir into a single `dirname/` entry. The collapsed form
+            // confused the sidebar: a directory entry has no extension /
+            // last-segment name (split('/').pop() = ''), so the row rendered
+            // as an empty-named file. `=all` is also how most git GUIs
+            // (VS Code, GitKraken, etc.) behave by default.
+            "--untracked-files=all",
         ])
         .current_dir(cwd)
         .output()
@@ -4482,6 +4492,156 @@ pub fn read_file_context(
     let start = center.saturating_sub(n as usize);
     let end = (center + n as usize + 1).min(lines.len());
     Ok(lines[start..end].iter().map(|s| s.to_string()).collect())
+}
+
+/// Drop a `.gitkeep` placeholder into `dir` (relative to `path`) so git
+/// starts tracking the directory. The user's untracked-empty-folder
+/// quick action wires to this — once `.gitkeep` exists, git sees the
+/// directory naturally and our usual status pass picks it up.
+/// Errors if `dir` escapes `path` (path traversal) or if the directory
+/// doesn't exist on disk.
+#[tauri::command]
+pub fn add_gitkeep(path: String, dir: String) -> Result<(), String> {
+    let root = std::path::PathBuf::from(&path);
+    let target = root.join(&dir);
+    let canon = target.canonicalize().map_err(fe)?;
+    let root_canon = root.canonicalize().map_err(fe)?;
+    if !canon.starts_with(&root_canon) {
+        return Err("path traversal rejected".into())
+    }
+    if !canon.is_dir() {
+        return Err(format!("not a directory: {}", dir))
+    }
+    let gk = canon.join(".gitkeep");
+    if gk.exists() { return Ok(()) }
+    std::fs::write(&gk, b"").map_err(fe)?;
+    Ok(())
+}
+
+/// Remove an empty directory from the working tree. Safe because
+/// `std::fs::remove_dir` refuses non-empty dirs — if the user managed
+/// to drop a file in between the scan and this click, the OS will
+/// error out rather than recursively nuke their work.
+/// Same path-traversal guard as add_gitkeep.
+#[tauri::command]
+pub fn remove_empty_dir(path: String, dir: String) -> Result<(), String> {
+    let root = std::path::PathBuf::from(&path);
+    let target = root.join(&dir);
+    let canon = target.canonicalize().map_err(fe)?;
+    let root_canon = root.canonicalize().map_err(fe)?;
+    if !canon.starts_with(&root_canon) {
+        return Err("path traversal rejected".into())
+    }
+    if canon == root_canon {
+        return Err("refusing to remove repo root".into())
+    }
+    std::fs::remove_dir(&canon).map_err(fe)?;
+    Ok(())
+}
+
+/// Walk the working tree for empty directories git wouldn't surface via
+/// `git status` (because git only tracks files — empty folders are invisible
+/// to it). Returns paths relative to the repo root. Used by the sidebar to
+/// render a "newly-created empty folder, won't get committed" hint with the
+/// untracked-N badge.
+///
+/// Conditions for inclusion:
+///   - directory contains zero entries (truly empty), OR every child is
+///     itself an untracked empty dir / `.git` / git-ignored
+///   - the directory itself is not git-ignored (.gitignore, .git/info/exclude)
+///   - not `.git` and not inside `.git`
+///
+/// Depth-limited (12 levels) and entry-capped (5_000 nodes) so a
+/// pathological tree can't lock us up. `.git`, `.DS_Store` and symlinks are
+/// short-circuited early so we never enter them.
+#[tauri::command]
+pub fn list_untracked_empty_dirs(path: String) -> Result<Vec<String>, String> {
+    const MAX_DEPTH: usize = 12;
+    const MAX_VISITED: usize = 5_000;
+    let repo = Repository::open(&path).map_err(fe)?;
+    let root = std::path::PathBuf::from(&path);
+    let mut out: Vec<String> = Vec::new();
+    let mut visited: usize = 0;
+    walk_for_empty_dirs(&root, &root, &repo, 0, MAX_DEPTH, &mut visited, MAX_VISITED, &mut out);
+    out.sort();
+    Ok(out)
+}
+
+/// Recursive helper. Returns `true` if `dir` is considered "empty for git"
+/// (no real files inside at any depth), which lets parents fold their state
+/// upward — a directory whose only child is an empty subdir is itself empty.
+fn walk_for_empty_dirs(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    repo: &Repository,
+    depth: usize,
+    max_depth: usize,
+    visited: &mut usize,
+    max_visited: usize,
+    out: &mut Vec<String>,
+) -> bool {
+    if *visited >= max_visited { return false }
+    if depth > max_depth { return false }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(it) => it,
+        Err(_) => return false,
+    };
+    let mut has_file = false;
+    let mut empty_subdirs: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        *visited += 1;
+        if *visited >= max_visited { break }
+        let name_os = entry.file_name();
+        let name = name_os.to_string_lossy();
+        if name == ".git" || name == ".DS_Store" { continue }
+        let file_type = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if file_type.is_symlink() { continue }   // never follow symlinks
+        let p = entry.path();
+        let rel = p.strip_prefix(root).unwrap_or(&p);
+        // Anything git is told to ignore counts as "not there" for this
+        // walk — gives the user the same result as `git status -uall`.
+        if repo.is_path_ignored(rel).unwrap_or(false) { continue }
+        if file_type.is_dir() {
+            let sub_empty = walk_for_empty_dirs(root, &p, repo, depth + 1, max_depth, visited, max_visited, out);
+            if sub_empty {
+                empty_subdirs.push(p);
+            } else {
+                // Subdir has real content — this dir is therefore not empty.
+                has_file = true;
+            }
+        } else if file_type.is_file() {
+            has_file = true;
+        }
+    }
+    // If this dir has any real files, none of the bubbled-up "subdir is
+    // empty" markers should be emitted — they're a side effect of an
+    // otherwise non-empty parent, and the user will see them naturally
+    // once they add a file. Emit them only when the parent itself is the
+    // bare leaf.
+    if !has_file {
+        // The deepest empty leaves are what the UI wants. If we already
+        // recorded a deeper empty path under one of these subdirs, leave
+        // them — but ALSO mark this directory as the canonical empty
+        // node if it has zero entries to begin with (root case).
+        if empty_subdirs.is_empty() && dir != root {
+            let rel = dir.strip_prefix(root).unwrap_or(dir).to_string_lossy().into_owned();
+            // Repo root is never reported.
+            if !rel.is_empty() && !repo.is_path_ignored(std::path::Path::new(&rel)).unwrap_or(false) {
+                out.push(rel);
+            }
+        } else {
+            // Bubble the empty subdir paths up so they appear in `out`.
+            for p in &empty_subdirs {
+                let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned();
+                out.push(rel);
+            }
+        }
+        return true
+    }
+    false
 }
 
 #[tauri::command]

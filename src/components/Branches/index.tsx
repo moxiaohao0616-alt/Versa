@@ -51,7 +51,6 @@ export function BranchesView() {
     repoPath,
   } = useStore()
   const [filter, setFilter] = useState('')
-  const [menuFor, setMenuFor] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<BranchInfo | null>(null)
   const [newName, setNewName] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null)
@@ -64,17 +63,6 @@ export function BranchesView() {
   useEffect(() => {
     loadBranches()
   }, [repoPath])
-
-  // Close kebab on outside click
-  useEffect(() => {
-    if (!menuFor) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Element
-      if (!t.closest('.commit-actions')) setMenuFor(null)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [menuFor])
 
   // Pre-fill + focus on rename modal open
   useEffect(() => {
@@ -161,8 +149,6 @@ export function BranchesView() {
           storageKey="local"
           items={local}
           emptyText={t('branches.empty_local')}
-          menuFor={menuFor}
-          setMenuFor={setMenuFor}
           onDoubleClick={(b) => onDoubleClickLocal(b.name, b.isCurrent)}
           onRename={(b) => setRenameTarget(b)}
           onDelete={(b) => setDeleteTarget(b)}
@@ -174,8 +160,6 @@ export function BranchesView() {
           defaultCollapsed
           items={remote}
           emptyText={t('branches.empty_remote')}
-          menuFor={menuFor}
-          setMenuFor={setMenuFor}
           onDoubleClick={(b) => checkoutRemoteBranch(b.name)}
           onRename={null}
           onDelete={(b) => setDeleteRemoteTarget(b)}
@@ -325,8 +309,6 @@ interface BranchListProps {
   defaultCollapsed?: boolean
   items: BranchInfo[]
   emptyText: string
-  menuFor: string | null
-  setMenuFor: (id: string | null) => void
   onDoubleClick: (b: BranchInfo) => void
   /** Provided callbacks render as menu items; null = hide that item. */
   onRename: ((b: BranchInfo) => void) | null
@@ -338,7 +320,6 @@ interface BranchListProps {
 
 function BranchList({
   title, storageKey, defaultCollapsed = false, items, emptyText,
-  menuFor, setMenuFor,
   onDoubleClick, onRename, onDelete, onMerge,
   deleteLabel,
 }: BranchListProps) {
@@ -360,17 +341,10 @@ function BranchList({
                 key={rowKey}
                 className={`branch-row ${b.isCurrent ? 'is-current' : ''} ${b.isRemote ? 'is-remote' : ''}`}
                 onDoubleClick={() => onDoubleClick(b)}
-                // Suppress the row-level tooltip while its action menu is open,
-                // otherwise the OS-native title bubble paints on top of the
-                // dropdown and makes it look translucent.
-                title={
-                  menuFor === rowKey
-                    ? undefined
-                    : (b.isCurrent ? t('branches.tooltip_current') : (b.isRemote ? t('branches.tooltip_remote') : t('branches.tooltip_local')))
-                }
+                title={b.isCurrent ? t('branches.tooltip_current') : (b.isRemote ? t('branches.tooltip_remote') : t('branches.tooltip_local'))}
               >
                 <i className={`ti ${b.isCurrent ? 'ti-check' : (b.isRemote ? 'ti-cloud' : 'ti-git-branch')} branch-icon`} />
-                <span className="branch-name">{b.name}</span>
+                <span className="branch-name" title={b.name}>{b.name}</span>
                 {/* Always render upstream + counts cells (empty when missing)
                     so grid columns line up across all rows. */}
                 <span className="branch-upstream" title={b.upstream ? b.upstream : undefined}>
@@ -385,39 +359,36 @@ function BranchList({
                   <span className="branch-sha">{b.lastShort}</span>
                   <span className="branch-time">{relTime(b.lastTime)}</span>
                   {hasAnyAction && !b.isCurrent && (
-                    <div className="commit-actions" onClick={e => e.stopPropagation()}>
-                      <button
-                        className="commit-actions-btn"
-                        onClick={() => setMenuFor(menuFor === rowKey ? null : rowKey)}
-                        title={t('cheatsheet.kebab_desc')}
-                        aria-label={t('cheatsheet.kebab_desc')}
-                      >
-                        <i className="ti ti-dots-vertical" />
-                      </button>
-                      {menuFor === rowKey && (
-                        <div className="commit-actions-menu">
-                          {onMerge && (
-                            <button onClick={() => { setMenuFor(null); onMerge(b) }}>
-                              <i className="ti ti-git-merge" />
-                              <span>{t('branches.merge_into_current')}</span>
-                            </button>
-                          )}
-                          {onRename && (
-                            <button onClick={() => { setMenuFor(null); onRename(b) }}>
-                              <i className="ti ti-pencil" />
-                              <span>{t('branches.rename')}</span>
-                            </button>
-                          )}
-                          {onDelete && (
-                            <button
-                              onClick={() => { setMenuFor(null); onDelete(b) }}
-                              title={finalDeleteLabel === t('branches.delete_remote') ? t('branches.delete_remote_help') : t('branches.delete_local_help')}
-                            >
-                              <i className="ti ti-trash" />
-                              <span>{finalDeleteLabel}</span>
-                            </button>
-                          )}
-                        </div>
+                    <div className="branch-actions" onClick={e => e.stopPropagation()}>
+                      {onMerge && (
+                        <button
+                          className="branch-action-btn"
+                          onClick={() => onMerge(b)}
+                          title={t('branches.merge_into_current')}
+                          aria-label={t('branches.merge_into_current')}
+                        >
+                          <i className="ti ti-git-merge" />
+                        </button>
+                      )}
+                      {onRename && (
+                        <button
+                          className="branch-action-btn"
+                          onClick={() => onRename(b)}
+                          title={t('branches.rename')}
+                          aria-label={t('branches.rename')}
+                        >
+                          <i className="ti ti-pencil" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          className="branch-action-btn danger"
+                          onClick={() => onDelete(b)}
+                          title={finalDeleteLabel === t('branches.delete_remote') ? t('branches.delete_remote_help') : t('branches.delete_local_help')}
+                          aria-label={finalDeleteLabel}
+                        >
+                          <i className="ti ti-trash" />
+                        </button>
                       )}
                     </div>
                   )}

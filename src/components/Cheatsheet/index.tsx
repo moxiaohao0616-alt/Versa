@@ -27,6 +27,7 @@ export function CheatsheetModal({ onClose }: { onClose: () => void }) {
         { keys: [MOD, 'W'],            desc: t('cheatsheet.close_tab') },
         { keys: [MOD, '⇧', ']'],       desc: t('cheatsheet.next_tab') },
         { keys: [MOD, '⇧', '['],       desc: t('cheatsheet.prev_tab') },
+        { keys: [MOD, '1‥9'],          desc: t('cheatsheet.nth_tab') },
       ],
     },
     {
