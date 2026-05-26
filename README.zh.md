@@ -96,11 +96,18 @@ Rust + libgit2 做数据层。虚拟滚动让 10k+ 行的 diff 也流畅。Commi
 
 去 [Releases](https://github.com/moxiaohao0616-alt/Versa/releases) 下载：
 
-- **macOS**：`Versa_*_aarch64.dmg`（Apple Silicon）
+- **macOS**：`Versa_*_aarch64.dmg` —— **仅支持 Apple Silicon（M 系列芯片）**，
+  Intel Mac 暂未提供。
 - **Linux**：`.AppImage` / `.deb` / `.rpm`
 - **Windows**：`*-setup.exe`
 
-> macOS 首次打开会被 Gatekeeper 拦（暂未做代码签名），右键 → 打开 即可。
+> **macOS 首次打开说明。** 暂未做代码签名，所以系统会拦截。多数情况下"右键 →
+> 打开"就能放行。如果系统仍然提示 *"Versa.app 已损坏，无法打开"*，运行下面这
+> 条命令去掉隔离属性：
+>
+> ```bash
+> sudo xattr -r -d com.apple.quarantine /Applications/Versa.app
+> ```
 
 ### 从源码构建
 

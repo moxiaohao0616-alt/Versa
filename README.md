@@ -100,11 +100,19 @@ can't say — never trapped.
 
 From [Releases](https://github.com/moxiaohao0616-alt/Versa/releases):
 
-- **macOS**: `Versa_*_aarch64.dmg` (Apple Silicon)
+- **macOS**: `Versa_*_aarch64.dmg` — **Apple Silicon (M-series) only**;
+  Intel build is not currently shipped.
 - **Linux**: `.AppImage` / `.deb` / `.rpm`
 - **Windows**: `*-setup.exe`
 
-> macOS first launch: right-click → Open (code signing pending).
+> **macOS first launch.** Code signing is still pending, so the OS will
+> block the app the first time. Right-click → Open works for most users.
+> If macOS still refuses with *"Versa.app is damaged and can't be opened"*,
+> strip the quarantine attribute:
+>
+> ```bash
+> sudo xattr -r -d com.apple.quarantine /Applications/Versa.app
+> ```
 
 ### From source
 
