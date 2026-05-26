@@ -281,6 +281,8 @@ export const en: Translations = {
     language_desc: "Switch Versa's UI language (repo content unaffected). i18n is still rolling out — some strings may remain in Chinese.",
     file_tree_view: 'Folder tree view',
     file_tree_view_desc: 'Render staged/unstaged file lists as a folder hierarchy. Off = flat list (default).',
+    show_editor_temp_files: 'Show editor temp files',
+    show_editor_temp_files_desc: 'By default Versa hides vim swap files (.swp), .DS_Store, emacs locks, and similar editor/OS noise from the unstaged list. Turn on to surface them.',
     gpg: 'Sign commits (GPG / SSH)',
     gpg_desc: 'When enabled, "Save progress" uses git commit -S and relies on your local git signing config.',
     ai_provider: 'AI provider',

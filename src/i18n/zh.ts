@@ -282,6 +282,8 @@ export const zh = {
     language_desc: '切换 Versa 自身 UI 的语言（不影响仓库内容）。i18n 还在渐进迁移，部分文案暂时仍是中文。',
     file_tree_view: '文件树视图',
     file_tree_view_desc: '把已暂存 / 未暂存的文件列表按文件夹层级展示。关闭则保持扁平列表（默认）。',
+    show_editor_temp_files: '显示编辑器临时文件',
+    show_editor_temp_files_desc: '默认会隐藏 vim swap (.swp)、.DS_Store、emacs 锁文件等编辑器/系统临时文件，避免列表里出现一堆 noise。打开后这些文件会照常显示。',
     gpg: '为提交签名（GPG / SSH）',
     gpg_desc: '开启后所有"保存进度"会以 git commit -S 提交，依赖你的本地 git 配置。',
     ai_provider: 'AI 服务商',

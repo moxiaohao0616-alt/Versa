@@ -221,6 +221,21 @@ function MainSettings({
             <span className="toggle-slider" />
           </label>
         </div>
+
+        <div className="settings-row">
+          <div>
+            <p className="settings-row-label">{t('settings.show_editor_temp_files')}</p>
+            <p className="settings-row-desc">{t('settings.show_editor_temp_files_desc')}</p>
+          </div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={useStore(s => s.showEditorTempFiles)}
+              onChange={e => useStore.getState().setShowEditorTempFiles(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
       </div>
 
       <div className="settings-section">

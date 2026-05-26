@@ -53,13 +53,7 @@ export function UnstagedGroups({
   const { t } = useTranslation()
   const { groups, assignments, activeId, createGroup, deleteGroup, setActive, moveFiles } =
     useChangelistStore()
-  // Untracked empty dirs for the current repo — surfaced in the tree as
-  // folder leaves with the red N badge so newly-created empty folders
-  // (invisible to `git status`) still show up.
   const repoPath = useStore(s => s.repoPath)
-  const emptyDirs = useStore(s =>
-    repoPath ? (s.untrackedEmptyDirsByRepo[repoPath] ?? []) : []
-  )
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -292,12 +286,14 @@ export function UnstagedGroups({
                     files={files}
                     renderFile={renderRow}
                     resetKey={resetKey}
-                    // Empty untracked dirs only belong in the default group —
-                    // they're not user-categorized work, just newly-created
-                    // folders git can't see. Custom changelists are about
-                    // *files the user moved into them*; an empty dir has
-                    // nothing to move.
-                    untrackedEmptyDirs={g.isDefault ? emptyDirs : undefined}
+                    // Don't surface untracked empty directories in the tree
+                    // anymore: they're folders git can't see (no files yet
+                    // = nothing tracked), and rendering them as red-badged
+                    // tree leaves was more clutter than value — users
+                    // reported the noise outweighed the "you have an empty
+                    // folder" reminder. Tree now shows only paths that
+                    // actually contain unstaged changes.
+                    untrackedEmptyDirs={undefined}
                     onAddGitkeep={async (dirPath) => {
                       if (!repoPath) return
                       try {
@@ -384,7 +380,7 @@ export function UnstagedGroups({
                   files.map(renderRow)
                 )
               })()}
-              {files.length === 0 && !(g.isDefault && emptyDirs.length > 0) && (
+              {files.length === 0 && (
                 <p
                   style={{
                     margin: '4px 8px',

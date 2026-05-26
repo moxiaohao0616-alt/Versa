@@ -80,9 +80,13 @@ export function RightPanel() {
 
   // If the persisted activeSection for the *current repo* is no longer in
   // the right dock (its terminal was closed, or it got docked to bottom),
-  // pick a sensible fallback: prefer the first terminal session if there
-  // are any (Claude/Codex output is what the user usually wants visible),
-  // else the first tool section. Empty right dock closes the panel.
+  // decide a sensible follow-up:
+  //   1. Another agent session running → switch to it (the user's attention
+  //      was on AI output; show the next one).
+  //   2. No agents left → close the entire panel. Don't auto-pop a tool
+  //      card like Project — the user was watching their agent, not
+  //      browsing tools, so opening Project after an exit feels like the
+  //      app forced an unrelated panel on them.
   useEffect(() => {
     if (rightSections.length === 0) {
       if (rightPanel.open) setPanelOpen('right', false)
@@ -91,8 +95,14 @@ export function RightPanel() {
     const stillThere = rightSections.some(s => s.id === activeSectionId)
     if (!stillThere) {
       const firstAgent = rightSections.find(s => s.session?.agentId)
-      const fallback = firstAgent ?? rightSections.find(s => s.session) ?? rightSections[0]
-      setPanelActiveSection('right', fallback.id)
+      if (firstAgent) {
+        setPanelActiveSection('right', firstAgent.id)
+      } else if (rightPanel.open) {
+        // No agent to fall back on — close instead of auto-activating
+        // the next tool section. Tool cards stay accessible via the
+        // strip; the user can pick one when they want one.
+        setPanelOpen('right', false)
+      }
     }
   }, [rightSections.map(s => s.id).join(','), activeSectionId])
 
@@ -217,6 +227,11 @@ export function RightPanel() {
           onClick={toggleLauncher}
         >
           <i className="ti ti-robot" />
+          {/* Small "+" badge — distinguishes the launcher (action button
+              that SPAWNS agents) from the per-session buttons below, which
+              are also robot icons and were visually indistinguishable
+              when an agent was active. */}
+          <i className="ti ti-plus right-panel-strip-launcher-badge" aria-hidden="true" />
         </button>
         {launcherOpen && (
           <div

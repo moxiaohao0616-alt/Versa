@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore, type ChangedFile } from '../../store'
+import { isEditorTempFile } from '../../lib/editorTempFiles'
 import { StashModal } from '../Stash'
 import { ReflogModal } from '../Reflog'
 import { GitProgressBar } from '../GitProgressBar'
@@ -34,12 +35,6 @@ export function Sidebar() {
   )
   const filesLoadPending = useStore(
     s => !!(s.repoPath && s.filesLoadPending[s.repoPath]),
-  )
-  // Untracked empty dirs count against "is the working tree clean?" —
-  // a freshly-mkdir'd folder is a real intent to put work somewhere, so
-  // the "workspace clean" empty-state shouldn't paper over them.
-  const emptyDirsCount = useStore(
-    s => (s.repoPath ? (s.untrackedEmptyDirsByRepo[s.repoPath] ?? []).length : 0),
   )
 
   const [stashOpen, setStashOpen] = useState(false)
@@ -155,8 +150,17 @@ export function Sidebar() {
   }
 
   const { files, ahead, behind } = repoStatus
-  const stagedFiles = files.filter(f => f.stagedStatus)
-  const unstagedFiles = files.filter(f => f.unstagedStatus)
+  const showEditorTempFiles = useStore(s => s.showEditorTempFiles)
+  // Display-only filter: hide editor / OS temp files (vim swap, .DS_Store,
+  // emacs lock files, …) from the sidebar lists unless the user explicitly
+  // opted in via Settings. The underlying `files` array stays intact, so
+  // save_progress / push see the full set if for any reason these files
+  // get staged on purpose.
+  const visibleFiles = showEditorTempFiles
+    ? files
+    : files.filter(f => !isEditorTempFile(f.path))
+  const stagedFiles = visibleFiles.filter(f => f.stagedStatus)
+  const unstagedFiles = visibleFiles.filter(f => f.unstagedStatus)
 
   // Force tree view once the file count crosses a threshold — flat-mode
   // rendering of thousands of rows is the dominant cost when switching into
@@ -329,13 +333,13 @@ export function Sidebar() {
               hairline progress bar between TabStrip and SubRepoStrip,
               driven globally by `loading` + `filesLoadPending` +
               `submoduleCheckPending` in App.tsx. */}
-          {files.length === 0 && emptyDirsCount === 0 && !submoduleCheckPending && !filesLoadPending ? (
+          {files.length === 0 && !submoduleCheckPending && !filesLoadPending ? (
             <div className="empty-state center" style={{ flex: 1 }}>
               <i className="ti ti-circle-check" style={{ fontSize: 36, opacity: 0.15 }} />
               <p>{t('sidebar.workspace_clean')}</p>
               <span style={{ fontSize: 12 }}>{t('sidebar.workspace_clean_sub')}</span>
             </div>
-          ) : files.length === 0 && emptyDirsCount === 0 ? <div style={{ flex: 1 }} /> : (
+          ) : files.length === 0 ? <div style={{ flex: 1 }} /> : (
             <>
               {stagedFiles.length > 0 && (() => {
                 // Inline renderer reused for both flat .map and tree mode.

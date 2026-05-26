@@ -876,6 +876,12 @@ interface VersaState {
   diffWordLevel: boolean   // show inline word-level highlight inside changed lines
   diffSideBySide: boolean  // render the diff as two columns instead of unified
   fileTreeView: boolean    // render staged/unstaged lists as a folder tree
+  /** Show editor / OS temp files (vim swap, .DS_Store, etc.) in the
+   *  unstaged file list. Default false — these dotfiles are noise for
+   *  most users (e.g. `vim foo.txt` flashes a `.foo.txt.swp` in the
+   *  list that vanishes on quit). isEditorTempFile() decides what
+   *  counts. Persisted. */
+  showEditorTempFiles: boolean
 
   /** Workspace roots the user has starred — sorted to the top of the
    *  left repo list. Persisted to localStorage. */
@@ -1043,6 +1049,7 @@ interface VersaState {
   setDiffWordLevel: (on: boolean) => void
   setDiffSideBySide: (on: boolean) => void
   setFileTreeView: (on: boolean) => void
+  setShowEditorTempFiles: (on: boolean) => void
   setSearchQuery: (q: string) => void
   setSearchOptions: (patch: Partial<{ regex: boolean; caseSensitive: boolean; pathspec: string }>) => void
   runSearch: () => Promise<void>
@@ -1174,6 +1181,7 @@ export const useStore = create<VersaState>((set, get) => ({
   diffWordLevel: localStorage.getItem('versa:diffWordLevel') !== '0',  // default ON
   diffSideBySide: localStorage.getItem('versa:diffSideBySide') === '1',
   fileTreeView: localStorage.getItem('versa:fileTreeView') === '1',
+  showEditorTempFiles: localStorage.getItem('versa:showEditorTempFiles') === '1',
   starredRepos: (() => {
     try { return JSON.parse(localStorage.getItem('versa:starredRepos') || '[]') }
     catch { return [] }
@@ -2629,6 +2637,10 @@ export const useStore = create<VersaState>((set, get) => ({
   setFileTreeView: (on) => {
     localStorage.setItem('versa:fileTreeView', on ? '1' : '0')
     set({ fileTreeView: on })
+  },
+  setShowEditorTempFiles: (on) => {
+    localStorage.setItem('versa:showEditorTempFiles', on ? '1' : '0')
+    set({ showEditorTempFiles: on })
   },
 
   setSearchQuery: (q) => set({ searchQuery: q }),

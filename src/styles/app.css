@@ -6407,6 +6407,32 @@ kbd {
 }
 .right-panel-strip-launcher > .ti { font-size: 18px; }
 
+/* Small "+" badge in the launcher's bottom-right corner. Distinguishes
+ * "open a new agent" (this button) from "switch to running agent X"
+ * (the per-session buttons below the launcher), which would otherwise
+ * be visually identical robot icons with green tints.
+ *
+ * The badge sits on the bg-colored surface of the strip so its outline
+ * reads as a small chip detached from the robot's silhouette. */
+.right-panel-strip-launcher-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px !important;
+  font-weight: 700;
+  background: var(--green);
+  color: #fff;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--fg) 7%, var(--bg));
+  line-height: 1;
+  pointer-events: none;
+}
+
 /* Explicit divider between the agent-stuff group (launcher + opened agent
  * sessions) above and the "everything else" group (tool sections, any
  * right-docked shell terminals) below. */

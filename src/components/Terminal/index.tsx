@@ -405,12 +405,17 @@ export function TerminalPane({
       if (!alive) { outFn(); return }
       unOut = outFn
 
-      // Agent tabs fire the auto-changelist promotion when their CLI exits.
-      // Shell tabs auto-close on exit: typing `exit` should dismiss the tab
-      // (and the whole panel if it was the last tab), the same way a real
-      // terminal app would — leaving a dead [process exited] tab around is
-      // dead weight.
-      const exitFn = await listen<void>(`pty:exit:${session.id}`, () => {
+      // Agent tabs fire the auto-changelist promotion when their CLI exits,
+      // then auto-close like shell tabs. Leaving the exited entry pinned in
+      // the right strip used to confuse users — they'd ctrl+C an agent and
+      // see a still-clickable button that opened an empty pane. The
+      // changelist created during promotion preserves whatever file edits
+      // the agent made, so closing the strip entry isn't lossy.
+      //
+      // Shell tabs already auto-close on exit (typing `exit` dismisses the
+      // tab the same way a real terminal app would — leaving a dead
+      // [process exited] tab is dead weight).
+      const exitFn = await listen<void>(`pty:exit:${session.id}`, async () => {
         const store = useStore.getState()
         const repo = store.repoPath
         if (session.agentId) {
@@ -420,7 +425,12 @@ export function TerminalPane({
               .getState()
               .terminalsByRepo[repo]
               ?.find((s) => s.id === session.id)
-            if (updated) void promoteAgentExitToChangelist(updated)
+            // Promote first (creates the "Claude @ 14:23" changelist),
+            // THEN close — order matters because promoteAgentExitToChangelist
+            // reads the session from the store, which closeTerminal would
+            // have already deleted.
+            if (updated) await promoteAgentExitToChangelist(updated)
+            useStore.getState().closeTerminal(repo, session.id)
           }
         } else if (repo) {
           // Shell tab: close it. Forget the session so a future tab with
