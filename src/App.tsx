@@ -13,7 +13,7 @@ import { BranchesView } from './components/Branches'
 import { UpdateBanner } from './components/UpdateBanner'
 import { CompareView } from './components/Compare'
 import { SearchPanel, SearchModal } from './components/Search'
-import { GraphView } from './components/Graph'
+import { HistoryPane } from './components/History/HistoryPane'
 import { ConflictView } from './components/Conflict'
 import { RepoListSidebar } from './components/RepoListSidebar'
 import { RepoPalette } from './components/RepoPalette'
@@ -362,20 +362,20 @@ export default function App() {
           AI 生成中…取消 (Esc)
         </button>
       )}
-      {/* Titlebar 始终渲染，保证交通灯和拖动区域始终存在 */}
-      <div
-        className="titlebar"
-        onMouseDown={e => {
-          // Exclude both traffic-lights and the branch switcher button so
-          // clicking either doesn't start a window drag.
-          const target = e.target as Element
-          if (e.button === 0
-              && !target.closest('.traffic-lights')
-              && !target.closest('.branch-switcher')) {
-            getCurrentWebviewWindow().startDragging()
-          }
-        }}
-      >
+      {/* Titlebar 始终渲染，保证交通灯和拖动区域始终存在.
+       *
+       * Use Tauri v2's `data-tauri-drag-region` attribute instead of a JS
+       * `startDragging()` mousedown handler. The JS approach captures
+       * macOS's drag tracking loop and prevents the subsequent dblclick
+       * event from firing, so a manual `onDoubleClick` to maximize never
+       * triggered. The attribute-based path gives us drag + native
+       * double-click-to-maximize for free, and honors the OS's preference
+       * (zoom vs minimize on macOS, max vs restore on Windows).
+       *
+       * Interactive children (the branch switcher, sync status, agent
+       * button) opt out of drag by wrapping with `data-tauri-drag-region=
+       * "false"` so their clicks still register. */}
+      <div className="titlebar" data-tauri-drag-region>
         {/* Active repo title — workspace name and, for multi-repo
             workspaces, the currently-focused sub-repo. Sits in the
             centre of the titlebar so it's visible from a glance no
@@ -400,8 +400,18 @@ export default function App() {
             </div>
           )
         })()}
-        {repoStatus && <BranchSwitcher variant="indicator" />}
-        <SyncStatus />
+        {/* Interactive widgets opt out of the drag region so their click
+         *  handlers (and dropdown popups) keep working. Without the
+         *  explicit "false", they'd inherit the parent titlebar's drag
+         *  behavior and mousedown would be eaten by window dragging. */}
+        {repoStatus && (
+          <div data-tauri-drag-region="false">
+            <BranchSwitcher variant="indicator" />
+          </div>
+        )}
+        <div data-tauri-drag-region="false">
+          <SyncStatus />
+        </div>
       </div>
 
       <div className="app-stack">
@@ -454,6 +464,7 @@ export default function App() {
               && activeTab !== 'branches'
               && activeTab !== 'history'
               && activeTab !== 'compare'
+              && activeTab !== 'search'
             // RightPanel decides internally whether its content + icon-strip
             // should render (it shows the strip whenever ANY section is
             // docked right, content only when open). We just gate it to the
@@ -535,7 +546,7 @@ export default function App() {
                   {activeTab === 'changes' && <Sidebar />}
                   <main className={`main-area${activeTab !== 'changes' ? ' settings-full' : ''}`}>
                     {activeTab === 'branches' ? <BranchesView />
-                      : activeTab === 'history' ? <GraphView />
+                      : activeTab === 'history' ? <HistoryPane />
                       : activeTab === 'compare' ? <CompareView />
                       : activeTab === 'search' ? <SearchPanel />
                       : <DiffView />}

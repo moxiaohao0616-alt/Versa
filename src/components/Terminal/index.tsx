@@ -243,22 +243,10 @@ export function Terminal() {
         </div>
         <span className="term-path">{repoPath}</span>
         <div className="term-actions">
-          {/* Agent launcher moved to the permanent first-position icon
-              in the right panel's strip — bottom panel no longer needs
-              its own; one entry point is less confusing. */}
-          {/* Dock the active session to the right panel — useful when a
-              long-running shell is doing AI-shaped work (claude code in a
-              regular shell, npm run dev with chatty output, etc.) and the
-              user wants the vertical space. */}
-          {activeId && (
-            <button
-              className="term-btn"
-              onClick={() => useStore.getState().setSectionDock(`terminal:${activeId}`, 'right')}
-              title={t('terminal.dock_to_right', 'Dock to right')}
-            >
-              <i className="ti ti-layout-sidebar-right" />
-            </button>
-          )}
+          {/* No "dock to right" action: right panel owns tool sections +
+              agent sessions; bottom panel owns shell terminals. The two
+              don't swap. Use the right panel's agent launcher for AI
+              workflows; use this panel for plain shells. */}
           <button
             className="term-btn"
             onClick={() => setTerminalOpen(false)}

@@ -145,7 +145,11 @@ export function GraphView() {
     graphCommits, graphLimit, graphLoading, graphSelected,
     loadGraph, loadMoreGraph, loadAllGraph, setGraphSelected, locateCommit,
     startBisect, aiSuggestBisectGood, showToast,
+    explainSelectedCommit,
   } = useStore()
+  // Subscribe reactively so the explain modal updates as the AI streams.
+  const commitExplanation = useStore(s => s.commitExplanation)
+  const commitExplanationLoading = useStore(s => s.commitExplanationLoading)
   const [bisectAiLoading, setBisectAiLoading] = useState(false)
   const [bisectAiReason, setBisectAiReason] = useState<string | null>(null)
   // Aliases to keep the existing JSX readable.
@@ -169,6 +173,12 @@ export function GraphView() {
   const [tagName, setTagName] = useState('')
   const [tagMessage, setTagMessage] = useState('')
   const [rebaseOpen, setRebaseOpen] = useState(false)
+  // Inline "AI explain this commit" modal — invoked from the row's kebab.
+  // The action used to live in the right panel as a standalone section, but
+  // that decoupled it from the place where the user actually picks a commit.
+  // Hosting it here keeps the input (commit row) and output (AI text) in the
+  // same eye-line.
+  const [explainTarget, setExplainTarget] = useState<RawCommit | null>(null)
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Filter state — client-side over the loaded window.
@@ -307,6 +317,21 @@ export function GraphView() {
     loadGraph()
   }
 
+  // Kick off "AI explain this commit" for a row picked from the kebab menu.
+  // We synchronously set `selectedCommit` in the store before calling
+  // explainSelectedCommit, because that action reads selectedCommit via get()
+  // and selectCommit's own write happens only AFTER its files/diff await
+  // resolves — otherwise the explain would see stale state and bail.
+  const openExplain = (p: RawCommit) => {
+    setMenuFor(null)
+    const info = { id: p.id, shortId: p.shortId, message: p.message }
+    setExplainTarget(p)
+    setSelected(p.id)
+    selectCommit(info)
+    useStore.setState({ selectedCommit: info, commitExplanation: null })
+    explainSelectedCommit()
+  }
+
   const { placed, edges, maxX } = useMemo(() => computeGraph(commits), [commits])
   const laneW = laneWidth(maxX)
 
@@ -343,6 +368,10 @@ export function GraphView() {
           </button>
           {menuFor === p.id && (
             <div className="commit-actions-menu">
+              <button onClick={() => openExplain(p)}>
+                <i className="ti ti-sparkles" />
+                <span>{t('graph.menu_explain')}</span>
+              </button>
               <button onClick={() => { setMenuFor(null); setCheckoutTarget(p) }}>
                 <i className="ti ti-git-branch" />
                 <span>{t('graph.menu_checkout')}</span>
@@ -582,6 +611,58 @@ export function GraphView() {
           </div>
         </div>
       )}
+
+      {explainTarget && (() => {
+        // Only show the streamed text if it actually belongs to this commit —
+        // a stale explanation from a previously-opened commit would otherwise
+        // briefly flash before the new one arrives.
+        const hasText = commitExplanation?.sha === explainTarget.id && !!commitExplanation?.text
+        const showRegenerate = !commitExplanationLoading && hasText
+        return (
+          <div className="modal-overlay" onClick={() => setExplainTarget(null)}>
+            <div className="modal modal-wide commit-explain-modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-title">
+                <i className="ti ti-sparkles" style={{ marginRight: 6 }} />
+                {t('graph.explain_title')}
+              </div>
+              <div className="modal-body">
+                <div className="modal-commit-preview">
+                  <span className="graph-sha">{explainTarget.shortId}</span>
+                  <span className="modal-commit-msg">{explainTarget.message}</span>
+                </div>
+                {hasText ? (
+                  <p className="commit-explain-text">
+                    {commitExplanation!.text}
+                    {commitExplanationLoading && <span className="ai-streaming-cursor">▌</span>}
+                  </p>
+                ) : (
+                  <div className="rs-loading">
+                    <i className="ti ti-loader-2" />
+                    <span>{t('rightsidebar.explain_thinking')}</span>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                {showRegenerate && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      useStore.setState({ commitExplanation: null })
+                      explainSelectedCommit()
+                    }}
+                  >
+                    <i className="ti ti-refresh" />
+                    {t('rightsidebar.explain_regenerate')}
+                  </button>
+                )}
+                <button className="btn-secondary" onClick={() => setExplainTarget(null)}>
+                  {t('common.close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {revertTarget && (
         <div className="modal-overlay" onClick={() => setRevertTarget(null)}>

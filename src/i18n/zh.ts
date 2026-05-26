@@ -110,6 +110,7 @@ export const zh = {
 
   welcome: {
     open_repo: '打开仓库',
+    new_repo: '新建仓库',
     clone_repo: '克隆远程仓库',
     recent: '最近打开',
     drop_hint: '把文件夹拖到这里也可以',
@@ -783,6 +784,9 @@ export const zh = {
     reset_hard_label: '硬回退（--hard）',
     reset_hard_desc: '所有未提交的改动都会丢。不可撤销！',
     reset_confirm: '确认回退',
+    menu_explain: '用 AI 解释这次改动',
+    explain_title: 'AI 解释这次提交',
+    detail_empty: '在左侧选一个提交，查看它改了哪些文件和具体改动。',
     menu_checkout: '切换到这里',
     menu_revert: '撤销这次提交',
     menu_cherrypick: '拣选到当前分支',
@@ -890,6 +894,9 @@ export const zh = {
     resize: '拖动调整宽度',
     project_scripts: '项目脚本',
     shell_scripts: 'Shell 脚本',
+    shell_args_edit: '编辑参数',
+    shell_args_run: '运行',
+    shell_args_placeholder: '参数（如 --env=prod），回车运行',
   },
 
   rightsidebar: {
@@ -920,6 +927,8 @@ export const zh = {
     recent: '最近',
     open_button: '打开仓库',
     open_tooltip: '把文件夹作为新仓库打开',
+    new_button: '新建仓库',
+    new_tooltip: '选个文件夹，git init 后作为新仓库打开',
     collapse: '收起到图标',
     expand: '展开列表',
     star: '收藏',

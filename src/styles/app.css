@@ -162,10 +162,10 @@ body {
  * window and `overflow: hidden` on .app-body clips the rightmost
  * column (the strip itself) off-screen. */
 .app-body.has-right-strip {
-  grid-template-columns: 52px 300px minmax(0, 1fr) 36px;
+  grid-template-columns: 52px 300px minmax(0, 1fr) 52px;
 }
 .app-body.has-right-strip.has-right-open {
-  grid-template-columns: 52px 300px minmax(0, 1fr) minmax(0, var(--right-panel-width, 320px)) 36px;
+  grid-template-columns: 52px 300px minmax(0, 1fr) minmax(0, var(--right-panel-width, 320px)) 52px;
 }
 /* Legacy alias — older Conflict view code paths still apply .has-right. */
 .app-body.has-right {
@@ -470,6 +470,20 @@ body {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* Same shape as .rs-explain-text but slightly larger — the explain modal
+ * has a 720px wide canvas, so 13px reads more comfortably than the 12px
+ * we used inside the cramped right-aux card. Also gives the streaming
+ * body a little vertical breathing room so the loader → text transition
+ * doesn't jump the layout. */
+.commit-explain-text {
+  font-size: 13px;
+  line-height: 1.65;
+  margin: 12px 0 4px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 60px;
 }
 .rs-explain-redo {
   display: inline-flex;
@@ -2081,6 +2095,109 @@ body {
 .content-tab:hover { color: var(--text); }
 .content-tab.active { color: var(--text); border-bottom-color: var(--green); font-weight: 500; }
 
+/* ── History view two-pane layout ───────────────────────────────────────── */
+/* The history tab is a split: GraphView on the left (commit list), and a
+ * CommitDetail panel on the right (selected commit's files + diff). We
+ * previously routed historical commit viewing through the Changes tab by
+ * leaning on the global selectedCommit flag, which made Changes mean two
+ * different things depending on hidden state. Hosting the detail here keeps
+ * input + output on one screen. */
+.history-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.history-pane > .graph-view {
+  /* Width comes from the wrapper's --history-graph-w CSS var, written by
+   * the resize-handle drag. Falls back to a sensible default the very
+   * first render before the store has hydrated. */
+  flex: 0 0 var(--history-graph-w, 420px);
+  min-width: 0;
+}
+
+.commit-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.commit-detail-files {
+  /* Inner pane width — driven by the same wrapper's --history-files-w
+   * var so both handles share one root for variable scope. */
+  flex: 0 0 var(--history-files-w, 280px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Thin invisible hit-target between the History panes. The hairline
+ * divider is the 1px ::before; the surrounding 5px wide area is the
+ * draggable surface so the user has a forgiving hit-box without the
+ * separator itself looking thick. Highlights on hover/drag with the
+ * accent color so it's discoverable. */
+.history-resize {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+  z-index: 1;
+}
+.history-resize::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.12s, width 0.12s, left 0.12s;
+}
+.history-resize:hover::before,
+.history-resize.is-dragging::before {
+  background: var(--green);
+  width: 2px;
+  left: 1.5px;
+}
+.commit-detail-diff {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Empty state when no commit is picked — fills the detail column so the
+ * layout doesn't visually collapse, and gives the user a single short
+ * sentence telling them what to do (click a commit on the left). */
+.commit-detail-empty {
+  align-items: center;
+  justify-content: center;
+}
+.commit-detail-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text3);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+  max-width: 320px;
+}
+.commit-detail-empty-state > .ti {
+  font-size: 32px;
+  opacity: 0.25;
+}
+.commit-detail-empty-state > p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* ── Graph View ─────────────────────────────────────────────────────────── */
 .graph-view {
   flex: 1;
@@ -3384,6 +3501,9 @@ kbd {
 .repo-list-footer {
   padding: 6px;
   border-top: 0.5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .repo-list-open-btn {
   width: 100%;
@@ -6206,8 +6326,8 @@ kbd {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 4px 0;
-  gap: 2px;
+  padding: 10px 0;
+  gap: 4px;
   /* SAME look whether the panel is open or closed. Previously the bg
    * was `var(--bg2)` (#f5f5f3 in light mode), which read fine sitting
    * against the OS chrome on the right edge — but with the panel open
@@ -6228,7 +6348,7 @@ kbd {
   z-index: 1;
 }
 .right-panel-strip-btn {
-  width: 28px; height: 28px;
+  width: 36px; height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6253,7 +6373,7 @@ kbd {
  * that read as a floating green line disconnected from any icon. The
  * green pill background alone is enough to show "this section is open"
  * without that extra ornament. */
-.right-panel-strip-btn > .ti { font-size: 14px; }
+.right-panel-strip-btn > .ti { font-size: 18px; }
 
 /* Right-panel launcher menu — same dropdown as Terminal's agent menu but
  * positioned to pop UP-AND-LEFT from a button on the right edge of the
@@ -6273,7 +6393,7 @@ kbd {
  *   - explicit gap + hairline separator under it so the dynamic icons
  *     below read as a separate row. */
 .right-panel-strip-launcher {
-  width: 32px; height: 32px;
+  width: 36px; height: 36px;
   color: var(--green);
   background: color-mix(in srgb, var(--green) 14%, transparent);
   /* Tight to the agent sessions that follow it (they're conceptually the
@@ -6378,4 +6498,122 @@ kbd {
 .rs-cmd-btn-shell > span {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 11px;
+}
+
+/* Shell-script chip wrapper: grid item that holds the main button + an
+ * inline caret to toggle the args editor. When expanded (`.is-open`)
+ * the wrapper spans the full grid row so the input+chips block has
+ * proper width regardless of how many auto-fit columns the panel
+ * currently shows. */
+.rs-cmd-shell-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rs-cmd-shell-wrap.is-open {
+  grid-column: 1 / -1;
+}
+.rs-cmd-shell-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+}
+.rs-cmd-shell-row > .rs-cmd-btn-shell {
+  flex: 1;
+  min-width: 0;
+}
+/* Tiny indicator dot on the main button when "last args" are remembered —
+ * lets the user tell "this script has a saved arg set" at a glance,
+ * without forcing the args panel open every time. */
+.rs-cmd-shell-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.rs-cmd-shell-caret {
+  width: 22px;
+  border: 0.5px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.rs-cmd-shell-caret:hover { background: var(--bg2); border-color: var(--border2); color: var(--text); }
+.rs-cmd-shell-caret.active { background: var(--bg2); border-color: var(--border2); color: var(--text); }
+
+.rs-cmd-shell-args {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg2);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rs-cmd-shell-input-row {
+  display: flex;
+  gap: 4px;
+}
+.rs-cmd-shell-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11.5px;
+  outline: none;
+}
+.rs-cmd-shell-input:focus { border-color: var(--green); }
+.rs-cmd-shell-run {
+  width: 28px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--green);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.rs-cmd-shell-run:hover { background: var(--bg); border-color: var(--green); }
+.rs-cmd-shell-run > .ti { font-size: 13px; }
+
+.rs-cmd-shell-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rs-cmd-shell-chip {
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text2);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rs-cmd-shell-chip:hover { background: var(--bg); border-color: var(--border2); color: var(--text); }
+.rs-cmd-shell-chip.active {
+  border-color: var(--green);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, var(--bg));
 }

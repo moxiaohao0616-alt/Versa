@@ -109,6 +109,7 @@ export const en: Translations = {
 
   welcome: {
     open_repo: 'Open repository',
+    new_repo: 'New repository',
     clone_repo: 'Clone remote',
     recent: 'Recently opened',
     drop_hint: 'You can also drop a folder here',
@@ -782,6 +783,9 @@ export const en: Translations = {
     reset_hard_label: 'Hard reset (--hard)',
     reset_hard_desc: 'All uncommitted changes are lost. Cannot be undone!',
     reset_confirm: 'Reset',
+    menu_explain: 'Explain with AI',
+    explain_title: 'AI explanation',
+    detail_empty: 'Pick a commit on the left to see its files and diff.',
     menu_checkout: 'Check out here',
     menu_revert: 'Revert this commit',
     menu_cherrypick: 'Cherry-pick onto current branch',
@@ -889,6 +893,9 @@ export const en: Translations = {
     resize: 'Drag to resize',
     project_scripts: 'Scripts',
     shell_scripts: 'Shell scripts',
+    shell_args_edit: 'Edit args',
+    shell_args_run: 'Run',
+    shell_args_placeholder: 'args (e.g. --env=prod), Enter to run',
   },
 
   rightsidebar: {
@@ -919,6 +926,8 @@ export const en: Translations = {
     recent: 'Recent',
     open_button: 'Open repo',
     open_tooltip: 'Open a folder as a new repo',
+    new_button: 'New repo',
+    new_tooltip: 'Pick a folder, git init it, and open as a new repo',
     collapse: 'Collapse to icons',
     expand: 'Expand repo list',
     star: 'Star',

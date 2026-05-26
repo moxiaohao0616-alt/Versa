@@ -4,8 +4,6 @@ import { useStore, defaultDockFor, type TermSession } from '../../store'
 import { useAgentStore } from '../../lib/agents'
 import { TerminalPane } from '../Terminal'
 import { ProjectSection } from './sections/ProjectSection'
-import { ExplainSection } from './sections/ExplainSection'
-import { StashSection } from './sections/StashSection'
 
 /** All possible right-panel sections — three fixed tool cards plus one
  *  per live terminal session. Sections are filtered by their dock target;
@@ -24,8 +22,6 @@ function useAllSections(): SectionMeta[] {
   return useMemo(() => {
     const out: SectionMeta[] = [
       { id: 'project', icon: 'ti-package', label: t('rightpanel.project', 'Project') },
-      { id: 'explain', icon: 'ti-sparkles', label: t('rightpanel.explain', 'Explain commit') },
-      { id: 'stash',   icon: 'ti-archive',  label: t('stash.title') },
     ]
     for (const s of sessions) {
       out.push({
@@ -40,12 +36,20 @@ function useAllSections(): SectionMeta[] {
   }, [sessions, t])
 }
 
-/** Resolve current dock for a section, falling back to the system default. */
+/** Resolve current dock for a section, falling back to the system default.
+ *  Tool sections (project / explain / stash) are FORCED to 'right' even if
+ *  the persisted map says 'bottom' — the bottom panel can't render them,
+ *  so any stale 'bottom' entry (from a pre-fix build where the user clicked
+ *  "dock to bottom" on a tool section) would otherwise hide the section
+ *  forever. Only terminal-backed sections may live in the bottom dock. */
+const TOOL_SECTION_IDS = new Set(['project'])
 function useDockResolver() {
   const dockMap = useStore(s => s.sectionDock)
   const terminalsByRepo = useStore(s => s.terminalsByRepo)
-  return (sectionId: string): 'right' | 'bottom' =>
-    dockMap[sectionId] ?? defaultDockFor(sectionId, { terminalsByRepo })
+  return (sectionId: string): 'right' | 'bottom' => {
+    if (TOOL_SECTION_IDS.has(sectionId)) return 'right'
+    return dockMap[sectionId] ?? defaultDockFor(sectionId, { terminalsByRepo })
+  }
 }
 
 /** The new right-side dockable panel. Replaces RightSidebar — hosts the
@@ -62,7 +66,6 @@ export function RightPanel() {
   const setPanelOpen = useStore(s => s.setPanelOpen)
   const setPanelActiveSection = useStore(s => s.setPanelActiveSection)
   const setPanelSize = useStore(s => s.setPanelSize)
-  const setSectionDock = useStore(s => s.setSectionDock)
   const activateSection = useStore(s => s.activateSection)
 
   const rightSections = sections.filter(s => resolveDock(s.id) === 'right')
@@ -172,13 +175,12 @@ export function RightPanel() {
             <i className={`ti ${activeSection.icon} right-panel-header-icon`} />
             <span className="right-panel-header-title">{activeSection.label}</span>
             <div className="right-panel-header-actions">
-              <button
-                className="right-panel-header-btn"
-                title={t('rightpanel.dock_to_bottom', 'Dock to bottom')}
-                onClick={() => setSectionDock(activeSection.id, 'bottom')}
-              >
-                <i className="ti ti-layout-bottombar" />
-              </button>
+              {/* The two panels are no longer interchangeable: the right
+               *  panel owns tool sections + agents, the bottom panel owns
+               *  shell terminals. No dock-swap button on either side —
+               *  the prior "dock to bottom" action would silently break
+               *  tool sections (the bottom panel can't render them) and
+               *  was confusing for terminals too. */}
               <button
                 className="right-panel-header-btn"
                 title={t('rightpanel.collapse', 'Collapse panel')}
@@ -197,8 +199,6 @@ export function RightPanel() {
                 panelHeight={rightPanel.width}
               />
             ) : activeSection.id === 'project' ? <ProjectSection />
-            : activeSection.id === 'explain' ? <ExplainSection />
-            : activeSection.id === 'stash'   ? <StashSection />
             : null}
           </div>
         </aside>

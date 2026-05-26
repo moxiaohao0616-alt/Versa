@@ -779,8 +779,12 @@ interface VersaState {
   // the right or at the bottom. Each panel is independently open/sized.
   //
   // Section id namespace:
-  //   - 'project' | 'explain' | 'stash'     ← the three aux cards
+  //   - 'project'                           ← the sole aux card today
   //   - `terminal:${sessionId}`             ← per-PTY session
+  // ('explain' and 'stash' used to be aux cards but were removed:
+  //  explain moved to the per-commit kebab in History view; stash kept
+  //  its existing entry in the Changes-tab Sidebar, which was the more
+  //  natural home for "set aside uncommitted work" anyway.)
   //
   // sectionDock stores **overrides** from defaults — missing key falls back
   // to: tool cards → 'right', terminal sessions → 'right' if it's an agent
@@ -876,6 +880,18 @@ interface VersaState {
   /** Workspace roots the user has starred — sorted to the top of the
    *  left repo list. Persisted to localStorage. */
   starredRepos: string[]
+  /** History view: width of the GraphView (commit-list) column in px.
+   *  The 3-pane layout's left drag-handle adjusts this. Persisted. */
+  historyGraphWidth: number
+  /** History view: width of the commit-files column in px. The middle
+   *  drag-handle adjusts this. Persisted. */
+  historyFilesWidth: number
+  /** Per-repo remembered args for shell-script buttons (the project
+   *  section's 🐚 block). Keyed by repo root → script command (the raw
+   *  "bash ./scripts/x.sh" string from `find_shell_scripts`) → { last:
+   *  most recently used args, history: MRU chips for quick refill }.
+   *  Persisted to localStorage. */
+  shellScriptArgs: Record<string, Record<string, { last: string, history: string[] }>>
   /** Whether the left repo list is collapsed to icon-only mode. */
   repoListCollapsed: boolean
 
@@ -965,6 +981,12 @@ interface VersaState {
   lfsPull: () => Promise<void>
   lfsFetch: () => Promise<void>
   cloneRepo: (url: string, dest: string) => Promise<string>
+  /** `git init` an arbitrary local folder, then open it as the active
+   *  repo (adds a tab via openRepo). Used by the Welcome screen + repo
+   *  list sidebar "new repo" entry points. Distinct from
+   *  initWorkspaceRoot, which is the workspace-root variant that has to
+   *  reconcile a parent workspace with its existing sub-repos. */
+  initRepo: (path: string) => Promise<void>
   checkoutCommit: (id: string, info?: SelectedCommitInfo) => Promise<void>
   loadHistory: () => Promise<void>
   loadConflicts: () => Promise<void>
@@ -986,6 +1008,12 @@ interface VersaState {
   popStash: (index: number) => Promise<void>
   dropStash: (index: number) => Promise<void>
   loadProject: () => Promise<void>
+  /** Remember the args the user typed for a given shell script in the
+   *  current repo. Stored per-repo so a script with the same path in
+   *  another workspace doesn't inherit the wrong default. Pushes args
+   *  to a deduped MRU history capped at 5 entries; empty string is a
+   *  no-op (we don't pollute history with "ran with no args"). */
+  setShellScriptArgs: (scriptCommand: string, args: string) => void
   sendToTerminal: (cmd: string) => void
   consumeTerminalCommand: () => void
   loadGraph: () => Promise<void>
@@ -1021,6 +1049,8 @@ interface VersaState {
   clearSearch: () => void
   toggleStarredRepo: (workspaceRoot: string) => void
   setRepoListCollapsed: (collapsed: boolean) => void
+  setHistoryGraphWidth: (width: number) => void
+  setHistoryFilesWidth: (width: number) => void
   /** Auto-expand graphLimit until `sha` is in the loaded window. Returns idx, or -1. */
   locateCommit: (sha: string) => Promise<number>
   loadBisectStatus: () => Promise<void>
@@ -1113,7 +1143,27 @@ export const useStore = create<VersaState>((set, get) => ({
     height: Number(localStorage.getItem('versa:bottomPanel:height') || 280),
   },
   sectionDock: (() => {
-    try { return JSON.parse(localStorage.getItem('versa:sectionDock') || '{}') }
+    try {
+      const raw = JSON.parse(localStorage.getItem('versa:sectionDock') || '{}') as Record<string, 'right' | 'bottom'>
+      // Migrate away any stale entries that were written when the panel
+      // header still offered "dock to bottom" on tool cards. The bottom
+      // panel can't render Project / Explain / Stash, so a persisted
+      // `{ project: 'bottom' }` would hide the section AND, via
+      // activateSection's resolver, redirect strip-button clicks to the
+      // wrong panel. Drop those keys here so the next write-back is clean.
+      // `explain` is no longer a right-panel section at all (the action
+      // moved to the commit row's kebab menu in the History view, where
+      // its context — a selected commit — actually lives). Clean any old
+      // dock entry for it here too so it doesn't linger forever.
+      let dirty = false
+      for (const key of Object.keys(raw)) {
+        if (key === 'project' || key === 'explain' || key === 'stash') {
+          delete raw[key]; dirty = true
+        }
+      }
+      if (dirty) localStorage.setItem('versa:sectionDock', JSON.stringify(raw))
+      return raw
+    }
     catch { return {} }
   })(),
   // Derived; kept in sync by the panel actions below. Initial value mirrors
@@ -1128,7 +1178,19 @@ export const useStore = create<VersaState>((set, get) => ({
     try { return JSON.parse(localStorage.getItem('versa:starredRepos') || '[]') }
     catch { return [] }
   })(),
+  shellScriptArgs: (() => {
+    try { return JSON.parse(localStorage.getItem('versa:shellScriptArgs') || '{}') }
+    catch { return {} }
+  })(),
   repoListCollapsed: localStorage.getItem('versa:repoListCollapsed') === '1',
+  historyGraphWidth: (() => {
+    const v = parseInt(localStorage.getItem('versa:historyGraphWidth') || '', 10)
+    return Number.isFinite(v) && v >= 200 ? v : 420
+  })(),
+  historyFilesWidth: (() => {
+    const v = parseInt(localStorage.getItem('versa:historyFilesWidth') || '', 10)
+    return Number.isFinite(v) && v >= 160 ? v : 280
+  })(),
   filesLoadPending: {},
   untrackedEmptyDirsByRepo: {},
   submoduleCheckPending: {},
@@ -1596,12 +1658,19 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   selectFile: async (path: string, staged = false, commitId?: string) => {
-    const { repoPath, diffIgnoreWhitespace } = get()
+    const { repoPath, diffIgnoreWhitespace, activeTab } = get()
     if (!repoPath) return
     const myGen = ++diffLoadGen
     const t0 = performance.now()
     console.log(`[selectFile] → ${path} (staged=${staged})`)
-    set({ selectedFile: path, selectedFileStaged: staged, loading: true, activeTab: 'changes' })
+    // Working-tree clicks navigate to the Changes tab (the user's
+    // expecting the staging UI to come up). Commit-file clicks should
+    // stay on whatever tab the user is on — typically History, where
+    // the new split-pane lets them see the file's diff in place. The
+    // old "always force Changes" behavior would yank them out of
+    // History every time they clicked a file in CommitDetail.
+    const nextTab = commitId ? activeTab : 'changes'
+    set({ selectedFile: path, selectedFileStaged: staged, loading: true, activeTab: nextTab })
     try {
       const diff = await invoke<DiffResult[]>('get_diff', {
         path: repoPath,
@@ -1794,12 +1863,33 @@ export const useStore = create<VersaState>((set, get) => ({
       // the actual push surface that error.
     }
     try {
-      if (repoStatus.files.length > 0) {
-        const msg = commitMessage.trim() ||
-          `${tt('toast.save_progress_default')} · ${new Date().toLocaleString(i18n.language.startsWith('en') ? 'en-US' : 'zh-CN', { hour12: false })}`
+      // Submodules with a dirty WORKING TREE but no HEAD movement still show
+      // up in repoStatus.files as `{ isSubmodule: true, unstagedStatus: 'M' }`
+      // because the parent's `git status` reports them as "modified content".
+      // But the parent CANNOT commit that — there's no new SHA to record, so
+      // `git add -A` is a no-op for those entries and the following
+      // `git commit` errors with "nothing to commit, working tree clean".
+      // That used to abort the whole pushBranch flow, even though CLI
+      // `git push` would have happily skipped right past it. Filter them out
+      // here so the auto-commit step only considers things actually
+      // committable from this repo.
+      const committableFiles = repoStatus.files.filter(f => !f.isSubmodule)
+      if (committableFiles.length > 0) {
+        // Default message: usually "保存进度 · <timestamp>", BUT when there's
+        // a merge in progress (user resolved conflicts and is now pushing
+        // without going through ConflictView's explicit Continue button),
+        // that message replaces git's natural "Merge branch X into Y"
+        // metadata with something meaningless. Match what ConflictView's
+        // continueMerge uses so the merge commit stays self-describing.
+        const isMerging = repoStatus.state === 'merging'
+        const msg = commitMessage.trim() || (
+          isMerging
+            ? `Merge into ${repoStatus.branch}`
+            : `${tt('toast.save_progress_default')} · ${new Date().toLocaleString(i18n.language.startsWith('en') ? 'en-US' : 'zh-CN', { hour12: false })}`
+        )
         // Same active-group filter as saveProgress so the implicit "push
         // commits your unstaged work" shortcut respects the user's grouping.
-        const pathspec = getActivePathspec(repoStatus.files)
+        const pathspec = getActivePathspec(committableFiles)
         if (pathspec === null) {
           await invoke('save_progress', { path: repoPath, message: msg })
         } else if (pathspec.length > 0) {
@@ -1814,6 +1904,8 @@ export const useStore = create<VersaState>((set, get) => ({
         // commit and just push whatever's already on the branch.
         if (commitMessage.trim()) set({ commitMessage: '' })
       }
+      // committableFiles.length === 0: only dirty submodules (or nothing) —
+      // skip auto-commit entirely and push whatever's already committed.
       await invoke('git_push', { path: repoPath, branch: repoStatus.branch })
       await get().refreshRepo()
       showToast(tt('toast.push_ok'), 'success')
@@ -2052,6 +2144,14 @@ export const useStore = create<VersaState>((set, get) => ({
   cloneRepo: async (url: string, dest: string) => {
     const result = await invoke<string>('git_clone', { url, dest })
     return result
+  },
+
+  initRepo: async (path: string) => {
+    // git_init_repo is idempotent — already-a-repo folders return their
+    // existing status; truly fresh folders get a new .git. Either way
+    // the next step is the same: bring the folder up as the active tab.
+    await invoke<RepoStatus>('git_init_repo', { path })
+    await get().openRepo(path)
   },
 
   checkoutCommit: async (id: string, info?: SelectedCommitInfo) => {
@@ -2484,7 +2584,14 @@ export const useStore = create<VersaState>((set, get) => ({
 
   activateSection: (sectionId) => {
     const s = get()
-    const dock = s.sectionDock[sectionId] ?? defaultDockFor(sectionId, s)
+    // Tool cards (project / explain / stash) ONLY render on the right
+    // panel. Even if a stale `sectionDock` entry says 'bottom' (from an
+    // older build that exposed a now-removed "dock to bottom" button),
+    // resolve them to 'right' here — otherwise the strip click would
+    // open the bottom terminal panel and the section itself would never
+    // appear, since the bottom panel has no render path for tool cards.
+    const isToolSection = sectionId === 'project'
+    const dock = isToolSection ? 'right' : (s.sectionDock[sectionId] ?? defaultDockFor(sectionId, s))
     const panel = dock === 'right' ? 'right' : 'bottom'
     const repoKey = s.repoPath || '__none__'
     // For right panel, "is this already the active section?" is per-repo.
@@ -2569,9 +2676,43 @@ export const useStore = create<VersaState>((set, get) => ({
     })
   },
 
+  setShellScriptArgs: (scriptCommand, args) => {
+    set(s => {
+      const repo = s.repoPath
+      if (!repo) return {}
+      const trimmed = args.trim()
+      const prevRepo = s.shellScriptArgs[repo] ?? {}
+      const prevEntry = prevRepo[scriptCommand] ?? { last: '', history: [] }
+      // Always update `last` (even to empty — user may want to clear).
+      // Only add non-empty args to history; dedup keeps the chip an MRU,
+      // capped at 5 so the row stays scannable.
+      const nextHistory = trimmed
+        ? [trimmed, ...prevEntry.history.filter(h => h !== trimmed)].slice(0, 5)
+        : prevEntry.history
+      const nextRepo = { ...prevRepo, [scriptCommand]: { last: trimmed, history: nextHistory } }
+      const next = { ...s.shellScriptArgs, [repo]: nextRepo }
+      localStorage.setItem('versa:shellScriptArgs', JSON.stringify(next))
+      return { shellScriptArgs: next }
+    })
+  },
+
   setRepoListCollapsed: (collapsed) => {
     localStorage.setItem('versa:repoListCollapsed', collapsed ? '1' : '0')
     set({ repoListCollapsed: collapsed })
+  },
+
+  setHistoryGraphWidth: (width) => {
+    // Caller is responsible for the constraint math (it has the parent
+    // width handy). We just clamp the absolute floor here to keep
+    // localStorage from holding a degenerate value.
+    const w = Math.max(200, Math.round(width))
+    localStorage.setItem('versa:historyGraphWidth', String(w))
+    set({ historyGraphWidth: w })
+  },
+  setHistoryFilesWidth: (width) => {
+    const w = Math.max(160, Math.round(width))
+    localStorage.setItem('versa:historyFilesWidth', String(w))
+    set({ historyFilesWidth: w })
   },
 
   loadBisectStatus: async () => {
@@ -2908,7 +3049,19 @@ export const useStore = create<VersaState>((set, get) => ({
     // its `finally` block, so we don't touch it here.
     invoke('cancel_ai_stream', { streamId: id }).catch(() => {})
   },
-  setTab: (tab) => set({ activeTab: tab }),
+  setTab: (tab) => {
+    // The Changes tab is now strictly the working tree. Drop any leftover
+    // selectedCommit when entering Changes so the Sidebar + DiffView don't
+    // silently fall into "view this past commit's files" mode (a confusing
+    // overload that the History view's split-pane layout now handles
+    // properly on its own). selectedFile / diff are cleared by the same
+    // action so the right pane resets cleanly; user lands in working-tree
+    // view every time.
+    if (tab === 'changes' && get().selectedCommit) {
+      set({ selectedCommit: null, commitFiles: [], diff: [], selectedFile: null })
+    }
+    set({ activeTab: tab })
+  },
   setTerminalOpen: (open) => get().setPanelOpen('bottom', open),
 
   openNewTerminal: (repoPath) => {

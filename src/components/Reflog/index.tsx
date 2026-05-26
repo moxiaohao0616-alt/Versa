@@ -51,7 +51,7 @@ export function ReflogModal({ onClose }: { onClose: () => void }) {
           <i className="ti ti-history" style={{ marginRight: 6 }} />
           {t('reflog.title')}
         </div>
-        <p className="modal-warn" style={{ margin: '0 16px 0' }}>
+        <p className="modal-warn" style={{ margin: '12px 16px 0' }}>
           <i className="ti ti-info-circle" />
           {t('reflog.hint')}
         </p>

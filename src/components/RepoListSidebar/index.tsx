@@ -18,7 +18,8 @@ export function RepoListSidebar() {
   const { t } = useTranslation()
   const {
     tabs, repoPath, recentRepos, starredRepos, repoListCollapsed,
-    switchTab, closeTab, openRepo, toggleStarredRepo, setRepoListCollapsed,
+    switchTab, closeTab, openRepo, initRepo, showToast,
+    toggleStarredRepo, setRepoListCollapsed,
   } = useStore()
 
   const [query, setQuery] = useState('')
@@ -70,6 +71,19 @@ export function RepoListSidebar() {
   const handleOpenNew = async () => {
     const picked = await open({ directory: true, multiple: false })
     if (picked && typeof picked === 'string') await openRepo(picked)
+  }
+
+  // git_init_repo a picked folder, then open it as a new tab. The folder
+  // can be empty (fresh start) or already contain files — those files
+  // become untracked, ready to commit.
+  const handleInitNew = async () => {
+    const picked = await open({ directory: true, multiple: false })
+    if (!picked || typeof picked !== 'string') return
+    try {
+      await initRepo(picked)
+    } catch (e) {
+      showToast(String(e), 'error')
+    }
   }
 
   const handleSwitch = (root: string) => {
@@ -152,10 +166,10 @@ export function RepoListSidebar() {
         )}
       </div>
 
-      {/* Footer "+ Open repo" button — hidden when there are zero open
-          tabs because the WelcomeScreen's central CTA covers that case
-          (would be a duplicate "打开仓库" button otherwise). Reappears
-          as soon as the user has at least one repo open. */}
+      {/* Footer "+ Open repo / + New repo" buttons — hidden when there
+          are zero open tabs because the WelcomeScreen's central CTAs
+          cover that case (would be duplicates otherwise). Reappears as
+          soon as the user has at least one repo open. */}
       {tabs.length > 0 && (
         <div className="repo-list-footer">
           <button
@@ -163,8 +177,16 @@ export function RepoListSidebar() {
             onClick={handleOpenNew}
             title={t('repo_list.open_tooltip')}
           >
-            <i className="ti ti-folder-plus" />
+            <i className="ti ti-folder-open" />
             {!repoListCollapsed && <span>{t('repo_list.open_button')}</span>}
+          </button>
+          <button
+            className="repo-list-open-btn"
+            onClick={handleInitNew}
+            title={t('repo_list.new_tooltip')}
+          >
+            <i className="ti ti-folder-plus" />
+            {!repoListCollapsed && <span>{t('repo_list.new_button')}</span>}
           </button>
         </div>
       )}

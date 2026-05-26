@@ -11,11 +11,25 @@ interface Props {
 
 export function WelcomeScreen({ onOpen }: Props) {
   const { t } = useTranslation()
-  const { openRepo, cloneRepo, showToast, gitProgress } = useStore()
+  const { openRepo, cloneRepo, initRepo, showToast, gitProgress } = useStore()
   const [cloneOpen, setCloneOpen] = useState(false)
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
   const [cloning, setCloning] = useState(false)
+
+  // "新建仓库" = pick a folder + git init + open. Symmetric with "打开仓库"
+  // (same folder picker), the only difference is the init step. Works on
+  // empty folders (fresh start) AND on folders with files (those become
+  // untracked entries the user can then commit).
+  const handleInit = async () => {
+    const selected = await open({ directory: true, multiple: false })
+    if (!selected || typeof selected !== 'string') return
+    try {
+      await initRepo(selected)
+    } catch (e) {
+      showToast(String(e), 'error')
+    }
+  }
 
   const handlePickDest = async () => {
     const selected = await open({ directory: true, multiple: false })
@@ -50,6 +64,10 @@ export function WelcomeScreen({ onOpen }: Props) {
           <button className="btn-primary large" onClick={onOpen}>
             <i className="ti ti-folder-open" />
             {t('welcome.open_repo')}
+          </button>
+          <button className="btn-secondary large" onClick={handleInit}>
+            <i className="ti ti-folder-plus" />
+            {t('welcome.new_repo')}
           </button>
           <button className="btn-secondary large" onClick={() => setCloneOpen(v => !v)}>
             <i className="ti ti-git-merge" />
