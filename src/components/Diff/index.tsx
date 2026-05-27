@@ -93,7 +93,7 @@ export function DiffView() {
   const { t } = useTranslation()
   const {
     diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit, repoPath,
-    stageHunk, unstageHunk, showToast,
+    stageHunk, unstageHunk, discardHunk, showToast,
     diffWordLevel, diffIgnoreWhitespace, diffSideBySide,
     setDiffWordLevel, setDiffIgnoreWhitespace, setDiffSideBySide,
   } = useStore()
@@ -609,6 +609,7 @@ export function DiffView() {
                       try { await unstageHunk(file, hunkIdx) }
                       catch (e) { showToast(String(e), 'error') }
                     },
+                    onDiscardHunk: (file, hunkIdx) => discardHunk(file, hunkIdx),
                   })}
                 </div>
               )
@@ -666,6 +667,7 @@ export function DiffView() {
 interface RenderActions {
   onStageHunk: (file: string, hunkIndex: number) => void | Promise<void>
   onUnstageHunk: (file: string, hunkIndex: number) => void | Promise<void>
+  onDiscardHunk: (file: string, hunkIndex: number) => void | Promise<void>
 }
 
 function renderItem(item: VItem, actions: RenderActions) {
@@ -683,16 +685,33 @@ function renderItem(item: VItem, actions: RenderActions) {
       <div className="hunk-header">
         <span>{item.header}</span>
         {op && (
-          <button
-            className="hunk-stage-btn"
-            onClick={() => op === 'stage'
-              ? actions.onStageHunk(item.file, item.hunkIndex)
-              : actions.onUnstageHunk(item.file, item.hunkIndex)}
-            title={op === 'stage' ? i18n.t('diff.stage_hunk_tooltip') : i18n.t('diff.unstage_hunk_tooltip')}
-          >
-            <i className={`ti ${op === 'stage' ? 'ti-plus' : 'ti-minus'}`} />
-            {op === 'stage' ? i18n.t('diff.stage_hunk') : i18n.t('diff.unstage_hunk')}
-          </button>
+          <div className="hunk-actions">
+            <button
+              className="hunk-stage-btn"
+              onClick={() => op === 'stage'
+                ? actions.onStageHunk(item.file, item.hunkIndex)
+                : actions.onUnstageHunk(item.file, item.hunkIndex)}
+              title={op === 'stage' ? i18n.t('diff.stage_hunk_tooltip') : i18n.t('diff.unstage_hunk_tooltip')}
+            >
+              <i className={`ti ${op === 'stage' ? 'ti-plus' : 'ti-minus'}`} />
+              {op === 'stage' ? i18n.t('diff.stage_hunk') : i18n.t('diff.unstage_hunk')}
+            </button>
+            {/* Discard only makes sense for an UNSTAGED hunk — for a staged
+                one the user should unstage first. Destructive, so confirm. */}
+            {op === 'stage' && (
+              <button
+                className="hunk-stage-btn hunk-discard-btn"
+                onClick={() => {
+                  if (!window.confirm(i18n.t('diff.discard_hunk_confirm'))) return
+                  actions.onDiscardHunk(item.file, item.hunkIndex)
+                }}
+                title={i18n.t('diff.discard_hunk_tooltip')}
+              >
+                <i className="ti ti-arrow-back-up" />
+                {i18n.t('diff.discard_hunk')}
+              </button>
+            )}
+          </div>
         )}
       </div>
     )

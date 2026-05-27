@@ -1331,7 +1331,18 @@ pub async fn git_push(
 
 #[tauri::command]
 pub async fn git_pull(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    streaming_git("pull", &["pull", "--progress"], Some(&path), &app).await
+    // Force `--no-rebase` so the pull always takes the merge strategy.
+    //
+    // git 2.27+ refuses a bare `git pull` on divergent branches without an
+    // explicit choice (`pull.rebase` / `pull.ff` config, or the CLI flag).
+    // Users who haven't set those globals see the wall-of-text
+    //   "fatal: Need to specify how to reconcile divergent branches"
+    // and the pull silently fails.
+    //
+    // The sidebar button literally says "Pull and merge" / "拉取并合并", so
+    // merge is the user's intent regardless of their git config. Passing
+    // --no-rebase makes the action do exactly what the label promises.
+    streaming_git("pull", &["pull", "--progress", "--no-rebase"], Some(&path), &app).await
 }
 
 #[tauri::command]
@@ -5336,6 +5347,29 @@ pub async fn stage_hunk(path: String, file: String, hunk_index: usize) -> Result
 #[tauri::command]
 pub async fn unstage_hunk(path: String, file: String, hunk_index: usize) -> Result<(), String> {
     apply_hunk(&path, &file, hunk_index, true).await
+}
+
+/// Discard a single unstaged hunk — throw away that segment's changes in the
+/// WORKING TREE. Unlike unstage_hunk (which moves the hunk index→HEAD via
+/// `--cached --reverse`, keeping the change in the working tree), this
+/// reverse-applies the hunk to the working tree itself with NO `--cached`,
+/// so the lines revert to their indexed/committed state. Destructive — the
+/// frontend gates it behind a confirm.
+#[tauri::command]
+pub async fn discard_hunk(path: String, file: String, hunk_index: usize) -> Result<(), String> {
+    // Same source diff as stage_hunk: the working-tree (unstaged) diff.
+    let raw = run_git_capture(&["diff", "--", &file], &path).await?;
+    if raw.trim().is_empty() {
+        return Err("没有可应用的改动".to_string());
+    }
+    let (header, hunks) = extract_hunks_from_diff(&raw)
+        .ok_or_else(|| "diff 解析失败".to_string())?;
+    let hunk = hunks.get(hunk_index)
+        .ok_or_else(|| format!("hunk #{} 不存在（共 {} 个）", hunk_index, hunks.len()))?;
+    let patch = format!("{}{}", header.concat(), hunk);
+    // `--reverse` undoes the hunk; no `--cached` so it lands on the working
+    // tree, not the index.
+    run_git_with_stdin(&["apply", "--reverse", "-"], &path, &patch).await
 }
 
 // ── Blame ────────────────────────────────────────────────────────────────

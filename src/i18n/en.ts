@@ -135,6 +135,15 @@ export const en: Translations = {
     branches: 'Branches',
     compare: 'Compare',
     search: 'Search',
+    // Short forms for the icon-bar labels (kept identical to the full
+    // names in English — they're already single short words).
+    changes_short: 'Changes',
+    history_short: 'History',
+    branches_short: 'Branches',
+    compare_short: 'Compare',
+    search_short: 'Search',
+    terminal_short: 'Terminal',
+    settings_short: 'Settings',
   },
 
   search: {
@@ -253,8 +262,11 @@ export const en: Translations = {
     path_copied: 'Path copied',
     stage_hunk: 'Stage hunk',
     unstage_hunk: 'Unstage hunk',
+    discard_hunk: 'Discard hunk',
     stage_hunk_tooltip: 'Stage just this hunk',
     unstage_hunk_tooltip: 'Remove just this hunk from the index',
+    discard_hunk_tooltip: 'Discard this hunk\'s changes (revert to unmodified — cannot be undone)',
+    discard_hunk_confirm: 'Discard this hunk\'s changes? The working tree reverts this segment to its unmodified state. This cannot be undone.',
     prev_file: 'Previous file',
     next_file: 'Next file',
     prev_hunk: 'Previous change',

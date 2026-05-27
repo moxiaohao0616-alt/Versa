@@ -30,7 +30,7 @@ import './styles/app.css'
 
 export default function App() {
   const { t } = useTranslation()
-  const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, toggleRightSidebar, tabs, setWorkspaceView } = useStore()
+  const { repoPath, repoStatus, terminalOpen, openRepo, theme, activeTab, rightSidebarOpen, tabs, setWorkspaceView } = useStore()
   // Subscribed so the grid template var below re-renders when the user
   // drags the right panel's resize handle.
   const rightPanelWidth = useStore(s => s.rightPanel.width)
@@ -192,9 +192,6 @@ export default function App() {
           break
         case 'toggle_terminal':
           s.setTerminalOpen(!s.terminalOpen)
-          break
-        case 'toggle_right_sidebar':
-          s.toggleRightSidebar()
           break
         case 'next_tab':
         case 'prev_tab': {
@@ -478,24 +475,14 @@ export default function App() {
             style={rsExpanded ? ({ ['--right-panel-width' as any]: `${rightPanelWidth}px` }) : undefined}
           >
             <nav className="icon-bar">
-              <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
-              <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
-              <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
-              <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
-              <IconBtn icon="ti-search" tab="search" label={t('tabs.search', 'Search')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-git-commit" tab="changes" label={t('tabs.changes')} shortLabel={t('tabs.changes_short')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-history" tab="history" label={t('tabs.history')} shortLabel={t('tabs.history_short')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-git-branch" tab="branches" label={t('tabs.branches')} shortLabel={t('tabs.branches_short')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-git-compare" tab="compare" label={t('tabs.compare')} shortLabel={t('tabs.compare_short')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
+              <IconBtn icon="ti-search" tab="search" label={t('tabs.search', 'Search')} shortLabel={t('tabs.search_short')} onClick={() => { setSettingsOpen(false); leaveOverview() }} />
               <div className="spacer" />
-              {inNormalView && (
-                <button
-                  className={`icon-btn ${rightSidebarOpen ? 'active' : ''}`}
-                  onClick={() => toggleRightSidebar()}
-                  title="Right panel"
-                  aria-label="Right panel"
-                >
-                  <i className="ti ti-layout-sidebar-right" />
-                </button>
-              )}
               <button
-                className={`icon-btn ${terminalOpen ? 'active' : ''}`}
+                className={`icon-btn icon-btn-nav ${terminalOpen ? 'active' : ''}`}
                 onClick={() => {
                   // Close Settings if it's the current main area — consistent
                   // with the four tab icons above which also close it. Any
@@ -508,15 +495,17 @@ export default function App() {
                 aria-label={t('cheatsheet.toggle_terminal')}
               >
                 <i className="ti ti-terminal-2" />
+                <span className="icon-btn-label">{t('tabs.terminal_short')}</span>
                 {terminalOpen && <span className="status-dot" />}
               </button>
               <button
-                className={`icon-btn ${settingsOpen ? 'active' : ''}`}
+                className={`icon-btn icon-btn-nav ${settingsOpen ? 'active' : ''}`}
                 title={t('common.settings')}
                 aria-label={t('common.settings')}
                 onClick={() => setSettingsOpen(v => !v)}
               >
                 <i className="ti ti-settings" />
+                <span className="icon-btn-label">{t('tabs.settings_short')}</span>
               </button>
             </nav>
             {settingsOpen ? (
@@ -583,11 +572,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function IconBtn({
-  icon, tab, label, onClick
+  icon, tab, label, shortLabel, onClick
 }: {
   icon: string
   tab?: 'changes' | 'history' | 'branches' | 'compare' | 'search'
   label: string
+  shortLabel?: string
   onClick?: () => void
 }) {
   const { activeTab, setTab } = useStore()
@@ -595,7 +585,7 @@ function IconBtn({
 
   return (
     <button
-      className={`icon-btn ${isActive ? 'active' : ''}`}
+      className={`icon-btn icon-btn-nav ${isActive ? 'active' : ''}`}
       title={label}
       aria-label={label}
       onClick={() => {
@@ -604,6 +594,7 @@ function IconBtn({
       }}
     >
       <i className={`ti ${icon}`} />
+      <span className="icon-btn-label">{shortLabel ?? label}</span>
     </button>
   )
 }

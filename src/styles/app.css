@@ -151,7 +151,7 @@ body {
 
 .app-body {
   display: grid;
-  grid-template-columns: 52px 300px 1fr;
+  grid-template-columns: 56px 300px 1fr;
   overflow: hidden;
 }
 /* Right side is now a 2-column appendage: an always-visible icon strip
@@ -162,14 +162,14 @@ body {
  * window and `overflow: hidden` on .app-body clips the rightmost
  * column (the strip itself) off-screen. */
 .app-body.has-right-strip {
-  grid-template-columns: 52px 300px minmax(0, 1fr) 52px;
+  grid-template-columns: 56px 300px minmax(0, 1fr) 52px;
 }
 .app-body.has-right-strip.has-right-open {
-  grid-template-columns: 52px 300px minmax(0, 1fr) minmax(0, var(--right-panel-width, 320px)) 52px;
+  grid-template-columns: 56px 300px minmax(0, 1fr) minmax(0, var(--right-panel-width, 320px)) 52px;
 }
 /* Legacy alias — older Conflict view code paths still apply .has-right. */
 .app-body.has-right {
-  grid-template-columns: 52px 300px 1fr 320px;
+  grid-template-columns: 56px 300px 1fr 320px;
 }
 
 .main-area {
@@ -300,6 +300,37 @@ body {
 }
 .icon-btn:hover { background: var(--bg); color: var(--text2); }
 .icon-btn.active { background: var(--bg); color: var(--text); }
+
+/* Nav buttons (the 5 page tabs) carry a label under the icon so the user
+ * always knows what each view is — the bare icons weren't self-explanatory.
+ * Taller + wider than the plain action buttons (terminal / settings, which
+ * stay icon-only at the bottom). */
+.icon-btn-nav {
+  width: 50px;
+  height: auto;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0 5px;
+  font-size: 18px;
+}
+.icon-btn-label {
+  font-size: 9.5px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+/* Active page tab = green pill (icon + label both green), matching the
+ * app's green accent used elsewhere for "this is selected" — the neutral
+ * white/dark fill read as inert. */
+.icon-btn-nav.active {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  color: var(--green);
+}
+.icon-btn-nav.active:hover {
+  background: color-mix(in srgb, var(--green) 22%, transparent);
+  color: var(--green);
+}
 .status-dot {
   position: absolute;
   bottom: 5px; right: 5px;
@@ -969,6 +1000,22 @@ body {
 .hunk-stage-btn > .ti { font-size: 11px; }
 .hunk-header:hover .hunk-stage-btn { opacity: 1; }
 .hunk-stage-btn:hover { background: var(--bg3); color: var(--text); }
+
+/* Stage + Discard sit side by side in the hunk header. */
+.hunk-actions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Discard is destructive — tint it red on hover so it reads differently
+ * from the neutral stage button right next to it. Reuses the app's
+ * --red-bg / --red-text danger palette (see .btn-danger, status-D). */
+.hunk-discard-btn:hover {
+  background: var(--red-bg);
+  border-color: var(--red-text);
+  color: var(--red-text);
+}
 
 .diff-line {
   display: flex;

@@ -136,6 +136,15 @@ export const zh = {
     branches: '分支',
     compare: '分支对比',
     search: '全局搜索',
+    // Short forms for the icon-bar labels (the full names wrap awkwardly
+    // in the narrow column). Full names stay as the hover tooltip.
+    changes_short: '变更',
+    history_short: '历史',
+    branches_short: '分支',
+    compare_short: '对比',
+    search_short: '搜索',
+    terminal_short: '终端',
+    settings_short: '设置',
   },
 
   search: {
@@ -254,8 +263,11 @@ export const zh = {
     path_copied: '已复制路径',
     stage_hunk: '暂存此段',
     unstage_hunk: '取消暂存此段',
+    discard_hunk: '忽略此段',
     stage_hunk_tooltip: '只暂存这一段',
     unstage_hunk_tooltip: '只把这一段从暂存区移除',
+    discard_hunk_tooltip: '丢弃这一段的改动（恢复到未修改前，不可撤销）',
+    discard_hunk_confirm: '丢弃这一段的改动？工作区会恢复到这段未修改前的状态，无法撤销。',
     prev_file: '上一个文件',
     next_file: '下一个文件',
     prev_hunk: '上一处改动',

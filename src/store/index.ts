@@ -968,6 +968,9 @@ interface VersaState {
   // Hunk staging
   stageHunk: (file: string, hunkIndex: number) => Promise<void>
   unstageHunk: (file: string, hunkIndex: number) => Promise<void>
+  /** Discard a single unstaged hunk — reverts that segment in the working
+   *  tree (destructive; UI confirms first). */
+  discardHunk: (file: string, hunkIndex: number) => Promise<void>
   // Blame
   blameFile: (file: string, commit?: string) => Promise<BlameLine[]>
   // Submodules
@@ -1910,11 +1913,18 @@ export const useStore = create<VersaState>((set, get) => ({
         }
         // pathspec.length === 0: active group has nothing — skip the implicit
         // commit and just push whatever's already on the branch.
-        if (commitMessage.trim()) set({ commitMessage: '' })
       }
       // committableFiles.length === 0: only dirty submodules (or nothing) —
       // skip auto-commit entirely and push whatever's already committed.
       await invoke('git_push', { path: repoPath, branch: repoStatus.branch })
+      // Push succeeded — clear any draft commit message the user had in
+      // the textarea, regardless of whether an auto-commit was created
+      // during this flow. Previously the clear was buried inside the
+      // committableFiles>0 branch, so a "push existing commits" click
+      // (workspace already clean, leftover draft in the box) left the
+      // stale message behind and looked broken. Catch path below skips
+      // this clear so the user keeps their draft if push failed.
+      if (commitMessage.trim()) set({ commitMessage: '' })
       await get().refreshRepo()
       showToast(tt('toast.push_ok'), 'success')
     } catch (e) {
@@ -2053,6 +2063,16 @@ export const useStore = create<VersaState>((set, get) => ({
     if (!repoPath) return
     await invoke('unstage_hunk', { path: repoPath, file, hunkIndex })
     await get().refreshRepo()
+  },
+  discardHunk: async (file, hunkIndex) => {
+    const { repoPath, showToast } = get()
+    if (!repoPath) return
+    try {
+      await invoke('discard_hunk', { path: repoPath, file, hunkIndex })
+      await get().refreshRepo()
+    } catch (e) {
+      showToast(String(e), 'error')
+    }
   },
 
   // ── Blame ────────────────────────────────────────────────────────────

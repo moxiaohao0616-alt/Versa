@@ -86,7 +86,7 @@ pub fn run() {
             list_reflog, restore_to_reflog, save_progress_signed,
             save_progress_pathspec,
             // Round 3: hunk staging + blame
-            stage_hunk, unstage_hunk, blame_file,
+            stage_hunk, unstage_hunk, discard_hunk, blame_file,
             // Submodules
             list_submodules, add_submodule, init_submodule, update_submodule,
             sync_submodule, deinit_submodule, remove_submodule,
