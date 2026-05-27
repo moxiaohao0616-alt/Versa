@@ -84,7 +84,7 @@ pub fn run() {
             list_tags, create_tag, delete_tag, push_tag, delete_remote_tag,
             // Round 2: reflog + GPG-aware commit
             list_reflog, restore_to_reflog, save_progress_signed,
-            save_progress_pathspec,
+            save_progress_pathspec, commit_staged,
             // Round 3: hunk staging + blame
             stage_hunk, unstage_hunk, discard_hunk, blame_file,
             // Submodules

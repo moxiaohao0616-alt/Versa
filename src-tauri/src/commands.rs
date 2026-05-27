@@ -1321,9 +1321,14 @@ pub async fn git_push(
     path: String,
     branch: String,
 ) -> Result<(), String> {
+    // `-u` sets upstream tracking (branch.<name>.remote / merge) on the first
+    // push. Without it, plain `git push origin X` leaves the branch untracked,
+    // so the ahead/behind count (and thus the push-badge) can't be computed
+    // afterward. Re-pushing an already-tracked branch with -u is a harmless
+    // no-op for the config.
     streaming_git(
         "push",
-        &["push", "--progress", "origin", &branch],
+        &["push", "--progress", "-u", "origin", &branch],
         Some(&path),
         &app,
     ).await
@@ -4460,13 +4465,45 @@ fn get_ahead_behind(repo: &Repository) -> Result<(usize, usize), git2::Error> {
     let head = repo.head()?;
     let local = head.target().ok_or_else(|| git2::Error::from_str("no HEAD"))?;
     let branch_name = head.shorthand().ok_or_else(|| git2::Error::from_str("no branch"))?;
-    // Use the configured upstream (branch.<name>.remote / merge) instead of
-    // hardcoding refs/remotes/origin/<branch> — the remote may not be "origin"
-    // and the local branch may track a different-named upstream.
     let local_branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
-    let upstream_oid = local_branch.upstream()?.get().target()
-        .ok_or_else(|| git2::Error::from_str("upstream has no target"))?;
-    repo.graph_ahead_behind(local, upstream_oid)
+    // Prefer the configured upstream (branch.<name>.remote / merge). But if
+    // none is set — which is common, e.g. a branch pushed with plain
+    // `git push origin X` (no `-u`) never gets tracking config — fall back
+    // to a remote-tracking ref named after the branch. Without this fallback
+    // the ahead count was always 0 for untracked branches, so the "push"
+    // badge never lit up even right after a local commit.
+    let upstream_oid = match local_branch.upstream() {
+        Ok(up) => up.get().target(),
+        Err(_) => find_remote_tracking_oid(repo, branch_name),
+    };
+    match upstream_oid {
+        Some(oid) => repo.graph_ahead_behind(local, oid),
+        // No upstream and no remote-tracking ref → the branch was never
+        // pushed anywhere; there's no baseline to be "ahead" of.
+        None => Ok((0, 0)),
+    }
+}
+
+/// Find a remote-tracking ref matching `branch` (origin/<branch> preferred,
+/// then any remote's <branch>) and return its target oid. Used as the
+/// ahead/behind baseline when a branch has no configured upstream.
+fn find_remote_tracking_oid(repo: &Repository, branch: &str) -> Option<git2::Oid> {
+    if let Ok(b) = repo.find_branch(&format!("origin/{branch}"), git2::BranchType::Remote) {
+        if let Some(oid) = b.get().target() {
+            return Some(oid);
+        }
+    }
+    if let Ok(remotes) = repo.remotes() {
+        for name in remotes.iter().flatten() {
+            if name == "origin" { continue }
+            if let Ok(b) = repo.find_branch(&format!("{name}/{branch}"), git2::BranchType::Remote) {
+                if let Some(oid) = b.get().target() {
+                    return Some(oid);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn repo_state_str(repo: &Repository) -> String {
@@ -5176,6 +5213,27 @@ pub async fn save_progress_signed(
     // Commit with -S; rely on user's git config for signing key + agent.
     run_git_simple(&["commit", "-S", "-m", &message], &path).await?;
     // Return the resulting HEAD sha for parity with save_progress.
+    let repo = Repository::open(&path).map_err(fe)?;
+    let head = repo.head().map_err(fe)?;
+    let oid = head.target().ok_or_else(|| "HEAD detached?".to_string())?;
+    Ok(oid.to_string())
+}
+
+/// Commit exactly what's already in the index — NO `git add`. Used when the
+/// user has manually staged a subset of files and "save progress" should
+/// honor that selection instead of sweeping the whole tree with `git add -A`.
+/// (Commit-scope priority: active changelist > manual staging > everything.)
+#[tauri::command]
+pub async fn commit_staged(
+    path: String,
+    message: String,
+    sign: bool,
+) -> Result<String, String> {
+    let mut args: Vec<&str> = vec!["commit", "-m", &message];
+    if sign {
+        args.push("-S");
+    }
+    run_git_simple(&args, &path).await?;
     let repo = Repository::open(&path).map_err(fe)?;
     let head = repo.head().map_err(fe)?;
     let oid = head.target().ok_or_else(|| "HEAD detached?".to_string())?;

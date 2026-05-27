@@ -1789,23 +1789,38 @@ export const useStore = create<VersaState>((set, get) => ({
 
     set({ loading: true })
     try {
+      // Commit-scope priority: active changelist > manual staging > everything.
+      //   1. custom changelist active → commit exactly that group's paths
+      //   2. no changelist BUT something is staged → commit only the index
+      //      (honor the user's manual selection; don't sweep with git add -A)
+      //   3. no changelist, nothing staged → git add -A and commit it all
+      // This keeps "save progress" aligned with what the AI commit message
+      // describes (it reads the staged diff whenever anything is staged).
+      const hasStaged = (repoStatus?.files ?? []).some(f => f.stagedStatus)
       let sha: string
-      if (pathspec === null) {
-        // Legacy path: no custom groups → commit everything (auto-stages all).
-        // save_progress_signed forwards to save_progress when sign=false; only
-        // the sign=true path shells out to `git commit -S`.
-        sha = await invoke<string>('save_progress_signed', {
-          path: repoPath,
-          message: commitMessage,
-          sign: gpgSign,
-        })
-      } else {
-        // Active group path: commit only the listed files, regardless of what
+      if (pathspec !== null) {
+        // (1) Active group: commit only the listed files, regardless of what
         // else is staged. Files outside the active group stay where they are.
         sha = await invoke<string>('save_progress_pathspec', {
           path: repoPath,
           message: commitMessage,
           pathspec,
+          sign: gpgSign,
+        })
+      } else if (hasStaged) {
+        // (2) Honor the manual staging — commit the index as-is, no git add.
+        sha = await invoke<string>('commit_staged', {
+          path: repoPath,
+          message: commitMessage,
+          sign: gpgSign,
+        })
+      } else {
+        // (3) Nothing staged, no groups → commit everything (auto-stages all).
+        // save_progress_signed forwards to save_progress when sign=false; only
+        // the sign=true path shells out to `git commit -S`.
+        sha = await invoke<string>('save_progress_signed', {
+          path: repoPath,
+          message: commitMessage,
           sign: gpgSign,
         })
       }
@@ -1898,21 +1913,25 @@ export const useStore = create<VersaState>((set, get) => ({
             ? `Merge into ${repoStatus.branch}`
             : `${tt('toast.save_progress_default')} · ${new Date().toLocaleString(i18n.language.startsWith('en') ? 'en-US' : 'zh-CN', { hour12: false })}`
         )
-        // Same active-group filter as saveProgress so the implicit "push
-        // commits your unstaged work" shortcut respects the user's grouping.
+        // Same commit-scope priority as saveProgress:
+        //   active changelist > manual staging > everything.
         const pathspec = getActivePathspec(committableFiles)
-        if (pathspec === null) {
+        const hasStaged = committableFiles.some(f => f.stagedStatus)
+        if (pathspec !== null) {
+          if (pathspec.length > 0) {
+            await invoke('save_progress_pathspec', {
+              path: repoPath, message: msg, pathspec, sign: gpgSign,
+            })
+          }
+          // pathspec.length === 0: active group has nothing — skip the
+          // implicit commit and just push whatever's already on the branch.
+        } else if (hasStaged) {
+          // Honor manual staging — commit the index as-is, no git add -A.
+          await invoke('commit_staged', { path: repoPath, message: msg, sign: gpgSign })
+        } else {
+          // Nothing staged, no groups → commit everything.
           await invoke('save_progress', { path: repoPath, message: msg })
-        } else if (pathspec.length > 0) {
-          await invoke('save_progress_pathspec', {
-            path: repoPath,
-            message: msg,
-            pathspec,
-            sign: gpgSign,
-          })
         }
-        // pathspec.length === 0: active group has nothing — skip the implicit
-        // commit and just push whatever's already on the branch.
       }
       // committableFiles.length === 0: only dirty submodules (or nothing) —
       // skip auto-commit entirely and push whatever's already committed.
