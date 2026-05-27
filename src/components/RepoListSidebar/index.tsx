@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-dialog'
-import { useStore, type WorkspaceTab, type RecentRepo } from '../../store'
+import { useStore, sortTabsForDisplay, type WorkspaceTab, type RecentRepo } from '../../store'
 
 /**
  * Left-edge repo manager. Vertical list of open workspaces, with a search
@@ -19,12 +19,16 @@ export function RepoListSidebar() {
   const {
     tabs, repoPath, recentRepos, starredRepos, repoListCollapsed,
     switchTab, closeTab, openRepo, initRepo, showToast,
-    toggleStarredRepo, setRepoListCollapsed,
+    toggleStarredRepo, setRepoListCollapsed, moveTab,
   } = useStore()
 
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<{ root: string; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // Drag-reorder state: which row is being dragged, and the live drop target
+  // (root + whether the indicator sits above or below that row).
+  const [dragRoot, setDragRoot] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<{ root: string; before: boolean } | null>(null)
 
   // The currently-active workspace = the tab containing repoPath, OR the
   // tab whose root matches repoPath (empty-workspace case).
@@ -36,16 +40,12 @@ export function RepoListSidebar() {
     return t?.root ?? null
   }, [tabs, repoPath])
 
-  // Starred-first sort within open tabs.
-  const sortedTabs = useMemo(() => {
-    const starSet = new Set(starredRepos)
-    return [...tabs].sort((a, b) => {
-      const sa = starSet.has(a.root) ? 0 : 1
-      const sb = starSet.has(b.root) ? 0 : 1
-      if (sa !== sb) return sa - sb
-      return 0  // keep open-order for ties
-    })
-  }, [tabs, starredRepos])
+  // Starred-first sort within open tabs. Shared with the ⌘1…9 shortcuts
+  // (sortTabsForDisplay) so the row order and the quick-jump index agree.
+  const sortedTabs = useMemo(
+    () => sortTabsForDisplay(tabs, starredRepos),
+    [tabs, starredRepos],
+  )
 
   // Filter both lists by query.
   const q = query.trim().toLowerCase()
@@ -137,6 +137,18 @@ export function RepoListSidebar() {
                 collapsed={repoListCollapsed}
                 onSelect={() => handleSwitch(tab.root)}
                 onContext={(x, y) => setMenu({ root: tab.root, x, y })}
+                dragging={dragRoot === tab.root}
+                dropHint={dropHint?.root === tab.root ? (dropHint.before ? 'before' : 'after') : null}
+                onDragStart={() => setDragRoot(tab.root)}
+                onDragOverRow={(before) => {
+                  if (dragRoot && dragRoot !== tab.root) setDropHint({ root: tab.root, before })
+                }}
+                onDropRow={(before) => {
+                  if (dragRoot && dragRoot !== tab.root) moveTab(dragRoot, tab.root, before)
+                  setDragRoot(null)
+                  setDropHint(null)
+                }}
+                onDragEnd={() => { setDragRoot(null); setDropHint(null) }}
               />
             ))}
           </>
@@ -219,9 +231,18 @@ interface RepoRowProps {
   collapsed: boolean
   onSelect: () => void
   onContext: (x: number, y: number) => void
+  dragging: boolean
+  dropHint: 'before' | 'after' | null
+  onDragStart: () => void
+  onDragOverRow: (before: boolean) => void
+  onDropRow: (before: boolean) => void
+  onDragEnd: () => void
 }
 
-function RepoRow({ tab, active, starred, collapsed, onSelect, onContext }: RepoRowProps) {
+function RepoRow({
+  tab, active, starred, collapsed, onSelect, onContext,
+  dragging, dropHint, onDragStart, onDragOverRow, onDropRow, onDragEnd,
+}: RepoRowProps) {
   // Branch label: from the active sub-repo's live snapshot, else just
   // the workspace name. Snapshots aren't subscribed-to here (would
   // re-render this row on every other repo's update), so we read
@@ -240,13 +261,33 @@ function RepoRow({ tab, active, starred, collapsed, onSelect, onContext }: RepoR
   const isMulti = (tab.repos?.length ?? 0) > 1
   const icon = isMulti ? 'ti-folders' : 'ti-folder'
 
+  // Shared HTML5 drag-reorder wiring. `before` = pointer is in the top half
+  // of the row → drop above it; otherwise below.
+  const dragProps = {
+    draggable: true,
+    onDragStart,
+    onDragEnd,
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault()
+      const r = e.currentTarget.getBoundingClientRect()
+      onDragOverRow(e.clientY < r.top + r.height / 2)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      const r = e.currentTarget.getBoundingClientRect()
+      onDropRow(e.clientY < r.top + r.height / 2)
+    },
+  }
+  const dragClass = `${dragging ? ' dragging' : ''}${dropHint ? ` drop-${dropHint}` : ''}`
+
   if (collapsed) {
     return (
       <button
-        className={`repo-row collapsed ${active ? 'active' : ''}`}
+        className={`repo-row collapsed ${active ? 'active' : ''}${dragClass}`}
         onClick={onSelect}
         onContextMenu={onCtxMenu}
         title={`${tab.name}${branch ? ` · ${branch}` : ''}`}
+        {...dragProps}
       >
         <i className={`ti ${icon}`} />
         {dirtyCount > 0 && <span className="repo-row-dot" />}
@@ -256,10 +297,11 @@ function RepoRow({ tab, active, starred, collapsed, onSelect, onContext }: RepoR
 
   return (
     <button
-      className={`repo-row ${active ? 'active' : ''}`}
+      className={`repo-row ${active ? 'active' : ''}${dragClass}`}
       onClick={onSelect}
       onContextMenu={onCtxMenu}
       title={tab.root}
+      {...dragProps}
     >
       <i className={`ti ${icon}`} />
       <div className="repo-row-text">

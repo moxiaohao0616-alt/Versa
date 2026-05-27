@@ -327,6 +327,9 @@ export interface SearchHit {
   line: number
   column: number
   content: string
+  /** True when the query matched the file's path/name rather than its
+   *  content. Such hits have line/column 0 and empty content. */
+  filenameMatch?: boolean
 }
 
 export interface RemoteInfo {
@@ -680,6 +683,23 @@ export function defaultDockFor(sectionId: string, s: { terminalsByRepo: Record<s
   return 'right'
 }
 
+/** Display order for the repo list: starred repos first, then open-order
+ *  for the rest. The SAME ordering must drive both the left RepoListSidebar
+ *  AND the ⌘1…9 quick-jump shortcuts, otherwise "the 2nd repo I see" and
+ *  "⌘2" point at different tabs once anything is starred. Relies on a
+ *  stable sort (true in V8 / the Tauri webview) so ties keep open-order. */
+export function sortTabsForDisplay<T extends { root: string }>(
+  tabs: T[],
+  starred: string[],
+): T[] {
+  const starSet = new Set(starred)
+  return [...tabs].sort((a, b) => {
+    const sa = starSet.has(a.root) ? 0 : 1
+    const sb = starSet.has(b.root) ? 0 : 1
+    return sa - sb
+  })
+}
+
 function findWorkspaceFor(tabs: WorkspaceTab[], repoPath: string | null): WorkspaceTab | null {
   if (!repoPath) return null
   return tabs.find(t =>
@@ -842,6 +862,15 @@ interface VersaState {
   /** AI explanation of the currently selected commit. Cleared when sha changes. */
   commitExplanation: { sha: string; text: string } | null
   commitExplanationLoading: boolean
+  /** AI explanation of the CURRENT working-tree diff (pre-commit). `key` is
+   *  the file path being explained, or '__all__' for the whole changeset.
+   *  Separate from commitExplanation so the two never collide. */
+  diffExplanation: { key: string; text: string } | null
+  diffExplanationLoading: boolean
+  /** Whether the working-diff explanation modal is open. In the store (not
+   *  DiffView-local) so the Sidebar's "explain all" button can open the same
+   *  modal that DiffView renders. */
+  diffExplainOpen: boolean
 
   // Stash list — refreshed alongside refreshRepo so the badge stays accurate
   stashes: StashEntry[]
@@ -928,6 +957,10 @@ interface VersaState {
   switchTab: (root: string) => Promise<void>
   /** Close a workspace tab (and clean up snapshots for all its sub-repos). */
   closeTab: (root: string) => Promise<void>
+  /** Drag-reorder open tabs. Moves `draggedRoot` to just before/after
+   *  `targetRoot` in the tabs array; the sidebar + ⌘1…9 follow because both
+   *  read sortTabsForDisplay over this array (starred still float to top). */
+  moveTab: (draggedRoot: string, targetRoot: string, before: boolean) => void
   /** Within the workspace that contains it, switch the focused sub-repo.
    *  Also flips that workspace's `view` to 'repo'. */
   switchSubRepo: (repoPath: string) => Promise<void>
@@ -1080,6 +1113,11 @@ interface VersaState {
   requestConflictSuggestion: (hunkIdx: number) => Promise<void>
   clearConflictSuggestion: () => void
   explainSelectedCommit: () => Promise<void>
+  /** Explain the current working-tree diff in plain language (pre-commit).
+   *  `file` = path to scope to one file (uses the shown diff), or null to
+   *  explain the ENTIRE unstaged changeset (fetched fresh). */
+  explainWorkingDiff: (file: string | null) => Promise<void>
+  setDiffExplainOpen: (open: boolean) => void
   /** Cancel the currently-streaming AI call, if any. No-op when idle. */
   cancelCurrentAI: () => void
   setTab: (tab: VersaState['activeTab']) => void
@@ -1126,6 +1164,9 @@ export const useStore = create<VersaState>((set, get) => ({
   aiConflictLoading: false,
   commitExplanation: null,
   commitExplanationLoading: false,
+  diffExplanation: null,
+  diffExplanationLoading: false,
+  diffExplainOpen: false,
   stashes: [],
   projectInfo: null,
   pendingTerminalCommand: null,
@@ -1623,6 +1664,19 @@ export const useStore = create<VersaState>((set, get) => ({
       set({ error: String(e) })
     }
   },
+
+  moveTab: (draggedRoot, targetRoot, before) => set(s => {
+    if (draggedRoot === targetRoot) return {}
+    const arr = [...s.tabs]
+    const fromIdx = arr.findIndex(t => t.root === draggedRoot)
+    if (fromIdx < 0) return {}
+    const [moved] = arr.splice(fromIdx, 1)
+    let toIdx = arr.findIndex(t => t.root === targetRoot)
+    if (toIdx < 0) return {}
+    if (!before) toIdx += 1
+    arr.splice(toIdx, 0, moved)
+    return { tabs: arr }
+  }),
 
   refreshRepo: async () => {
     const { repoPath } = get()
@@ -3083,6 +3137,74 @@ export const useStore = create<VersaState>((set, get) => ({
       set({ commitExplanationLoading: false })
     }
   },
+
+  explainWorkingDiff: async (file) => {
+    const { repoPath, aiConfig, showToast, diff } = get()
+    if (!repoPath) return
+    if (!aiConfig.apiKey.trim()) {
+      showToast(tt('toast.ai_not_configured'), 'error')
+      return
+    }
+    // Resolve which diff to explain:
+    //   - file === null → the ENTIRE unstaged changeset (fetched fresh, so it
+    //     doesn't depend on whatever single file the DiffView happens to show)
+    //   - file !== null → what the DiffView currently shows (the selected
+    //     file's diff, staged or unstaged as displayed)
+    // Reuses the commit-explain backend (it only cares about the diff text);
+    // empty subject/author since this isn't a commit yet.
+    const key = file ?? '__all_unstaged__'
+    let diffText: string
+    if (file === null) {
+      try {
+        const diffs = await invoke<DiffResult[]>('get_diff', {
+          path: repoPath, file: null, staged: false, commitId: null,
+        })
+        diffText = diffsToUnifiedText(diffs)
+      } catch (e) {
+        showToast(String(e), 'error')
+        return
+      }
+    } else {
+      diffText = diffsToUnifiedText(diff)
+    }
+    if (!diffText.trim()) {
+      showToast(tt('toast.no_diff'), 'error')
+      return
+    }
+    set({ diffExplanationLoading: true, diffExplanation: { key, text: '' } })
+    try {
+      const text = await withAIStream(
+        'ai_explain_commit',
+        {
+          provider: aiConfig.provider,
+          apiKey: aiConfig.apiKey,
+          model: aiConfig.model.trim() || null,
+          baseUrl: aiConfig.baseUrl.trim() || null,
+          subject: '',
+          body: '',
+          author: '',
+          diff: diffText,
+        },
+        acc => {
+          // Drop late deltas if the user switched to a different file.
+          if (get().diffExplanation?.key === key) {
+            set({ diffExplanation: { key, text: acc } })
+          }
+        },
+        id => set({ currentAiStreamId: id }),
+      )
+      if (get().diffExplanation?.key === key) {
+        set({ diffExplanation: { key, text: text.trim() } })
+      }
+    } catch (e) {
+      showToast(String(e), 'error')
+      set({ diffExplanation: null })
+    } finally {
+      set({ diffExplanationLoading: false })
+    }
+  },
+
+  setDiffExplainOpen: (open) => set({ diffExplainOpen: open }),
 
   loadHistory: async () => {
     const { repoPath } = get()

@@ -145,15 +145,27 @@ export function SearchPanel({ compact = false, onClose }: { compact?: boolean; o
                 <span className="search-file-count">{hits.length}</span>
               </div>
               {hits.map((h, idx) => (
-                <div
-                  key={`${file}:${h.line}:${h.column}:${idx}`}
-                  className={`search-hit-row${selected?.file === file && selected.line === h.line ? ' active' : ''}`}
-                  onClick={() => setSelected({ file: h.file, line: h.line })}
-                  title={`${file}:${h.line}:${h.column}`}
-                >
-                  <span className="search-hit-line">{h.line}</span>
-                  <span className="search-hit-content">{h.content}</span>
-                </div>
+                h.filenameMatch ? (
+                  <div
+                    key={`${file}:name:${idx}`}
+                    className={`search-hit-row search-hit-filename${selected?.file === file && selected.line === 1 ? ' active' : ''}`}
+                    onClick={() => setSelected({ file: h.file, line: 1 })}
+                    title={file}
+                  >
+                    <i className="ti ti-file-text search-hit-filename-icon" />
+                    <span className="search-hit-content">{t('search.filename_match', '文件名匹配')}</span>
+                  </div>
+                ) : (
+                  <div
+                    key={`${file}:${h.line}:${h.column}:${idx}`}
+                    className={`search-hit-row${selected?.file === file && selected.line === h.line ? ' active' : ''}`}
+                    onClick={() => setSelected({ file: h.file, line: h.line })}
+                    title={`${file}:${h.line}:${h.column}`}
+                  >
+                    <span className="search-hit-line">{h.line}</span>
+                    <span className="search-hit-content">{h.content}</span>
+                  </div>
+                )
               ))}
             </div>
           ))}
@@ -193,6 +205,7 @@ function SearchPreview({
   const [preview, setPreview] = useState<FilePreview | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lineRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const currentFile = selection?.file ?? null
@@ -261,10 +274,25 @@ function SearchPreview({
     <div className="search-preview" ref={scrollRef}>
       <div className="search-preview-title">
         <i className="ti ti-file-text" />
-        <span>{selection.file}</span>
+        <span className="search-preview-path">{selection.file}</span>
         {preview.truncated && (
           <span className="search-preview-truncated-tag">{t('search.preview_truncated', 'truncated')}</span>
         )}
+        <button
+          className="search-preview-copy"
+          title={t('search.copy_content', '复制文件内容')}
+          aria-label={t('search.copy_content', '复制文件内容')}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(preview.content)
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            } catch { /* clipboard denied — degrade silently */ }
+          }}
+        >
+          <i className={`ti ${copied ? 'ti-check' : 'ti-copy'}`} />
+          {copied ? t('search.copied', '已复制') : t('search.copy', '复制')}
+        </button>
       </div>
       <div className="search-preview-body">
         {lines.map((text, i) => {

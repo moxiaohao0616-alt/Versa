@@ -2410,6 +2410,23 @@ body {
 }
 .modal-wide { width: 720px; max-width: 92vw; }
 
+/* AI explanation modal: cap to the viewport and scroll the body so long
+ * explanations don't grow the whole dialog past the top/bottom edges.
+ * Title + footer stay pinned; only the body (the rendered markdown)
+ * scrolls. */
+.commit-explain-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.commit-explain-modal > .modal-title,
+.commit-explain-modal > .modal-footer { flex: 0 0 auto; }
+.commit-explain-modal > .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* ── Cheatsheet ──────────────────────────────────────────────────── */
 .cheatsheet-modal { width: 640px; }
 .cheatsheet-body {
@@ -3453,6 +3470,13 @@ kbd {
   margin-bottom: 1px;
 }
 .repo-row:hover { background: var(--bg); }
+/* Drag-reorder feedback. `.dragging` dims the moved row; the drop target
+ * gets a green line at its top (drop-before) or bottom (drop-after) via an
+ * inset box-shadow — avoids clashing with the active row's ::before accent
+ * bar that already uses the pseudo-element. */
+.repo-row.dragging { opacity: 0.4; }
+.repo-row.drop-before { box-shadow: inset 0 2px 0 var(--green); }
+.repo-row.drop-after { box-shadow: inset 0 -2px 0 var(--green); }
 .repo-row.active {
   background: color-mix(in srgb, var(--green) 12%, transparent);
   border-color: color-mix(in srgb, var(--green) 28%, transparent);
@@ -4295,6 +4319,40 @@ kbd {
 }
 .ai-review-content p { margin: 0 0 8px; }
 .ai-review-content strong { font-weight: 600; }
+
+/* Shared markdown styling for AI explanation panels (commit/diff explain,
+ * merge risk/conflict). Mirrors .ai-review-content so all AI output reads
+ * consistently. Applied via the .ai-markdown class on the rendered <div>. */
+.ai-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  /* CRITICAL: normal (not pre-wrap). The content is rendered HTML whose
+   * block tags are joined with "\n"; under pre-wrap those newlines render
+   * as real blank lines, stacking big gaps between paragraphs/lists on top
+   * of the margins. Block elements handle their own line breaks. */
+  white-space: normal;
+}
+.ai-markdown h2, .ai-markdown h3, .ai-markdown h4 {
+  font-size: 13px; font-weight: 600; margin: 12px 0 5px; color: var(--text);
+}
+.ai-markdown h2:first-child, .ai-markdown h3:first-child, .ai-markdown h4:first-child { margin-top: 0; }
+.ai-markdown p { margin: 0 0 8px; }
+.ai-markdown p:last-child { margin-bottom: 0; }
+.ai-markdown ul { list-style: none; padding: 0; margin: 0 0 8px; }
+.ai-markdown li { position: relative; padding-left: 16px; margin-bottom: 4px; }
+.ai-markdown li::before {
+  content: '•'; position: absolute; left: 4px; color: var(--text3);
+}
+.ai-markdown strong { font-weight: 600; }
+.ai-markdown code {
+  background: var(--bg2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
 
 /* AI PR button in the Compare toolbar */
 .compare-ai-pr {
@@ -5330,7 +5388,10 @@ kbd {
 }
 .merge-file-detail-text {
   margin: 0;
-  white-space: pre-wrap;
+  /* normal, not pre-wrap — this now holds rendered markdown HTML (see
+   * .ai-markdown); pre-wrap would turn the inter-tag newlines into blank
+   * lines and balloon the spacing. */
+  white-space: normal;
 }
 
 .merge-ai-section {
@@ -5359,7 +5420,7 @@ kbd {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.55;
-  white-space: pre-wrap;
+  white-space: normal;
   padding: 8px 10px;
   background: color-mix(in srgb, #EF9F27 8%, var(--bg));
   border: 0.5px solid color-mix(in srgb, #EF9F27 40%, var(--border));
@@ -6150,6 +6211,18 @@ kbd {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis;
 }
+/* Filename-match row: a path hit (not a content line). Italic + muted so
+ * it reads as metadata, with a leading file icon in place of a line no. */
+.search-hit-filename .search-hit-content {
+  font-style: italic;
+  opacity: 0.7;
+}
+.search-hit-filename-icon {
+  min-width: 40px;
+  text-align: right;
+  font-size: 12px;
+  opacity: 0.5;
+}
 
 /* Two-pane layout: results list (left) + file preview (right) */
 .search-body {
@@ -6232,6 +6305,25 @@ kbd {
   background: color-mix(in srgb, #EF9F27 35%, transparent);
   color: var(--fg);
 }
+/* Copy-file-content button, right-aligned in the preview title bar (the
+ * path span's flex:1 pushes it to the edge). */
+.search-preview-copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text2);
+  cursor: pointer;
+}
+.search-preview-copy:hover { background: var(--bg2); border-color: var(--border2); color: var(--text); }
+.search-preview-copy > .ti { font-size: 12px; }
+.search-preview-copy .ti-check { color: var(--green); }
 .search-preview-body {
   flex: 1 1 auto;
   overflow: auto;

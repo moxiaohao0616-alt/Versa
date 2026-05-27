@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import type { DiffLine, DiffResult } from '../../store'
 import { buildHunkInlineDiffs, type CharSeg } from './wordDiff'
 import { detectLanguage, highlightLine } from './highlight'
+import { renderLiteMarkdown } from '../../lib/lite-markdown'
 import { BlameModal } from '../Blame'
 import { FileHistoryModal } from '../FileHistory'
 import { BlockHistoryModal } from '../BlockHistory'
@@ -94,6 +95,8 @@ export function DiffView() {
   const {
     diff, selectedFile, repoStatus, selectedFileStaged, selectedCommit, repoPath,
     stageHunk, unstageHunk, discardHunk, showToast,
+    explainWorkingDiff, diffExplanation, diffExplanationLoading,
+    diffExplainOpen, setDiffExplainOpen,
     diffWordLevel, diffIgnoreWhitespace, diffSideBySide,
     setDiffWordLevel, setDiffIgnoreWhitespace, setDiffSideBySide,
   } = useStore()
@@ -412,6 +415,21 @@ export function DiffView() {
               <span className="added">+{added}</span>
               <span className="removed">-{removed}</span>
             </div>
+            {/* Explain the working-tree changes in plain language — for users
+                who AI-wrote the code and want to understand it BEFORE
+                committing. Only for uncommitted diffs (a selected commit
+                already has its own explain in the History kebab). Scopes to
+                the selected file, or the whole changeset under "view all". */}
+            {!selectedCommit && diff.length > 0 && (
+              <button
+                className="ct-btn ghost diff-explain-btn"
+                onClick={() => { setDiffExplainOpen(true); explainWorkingDiff(selectedFile) }}
+                title={t('diff.explain_tooltip', '用 AI 解释这些改动')}
+              >
+                <i className="ti ti-sparkles" />
+                <span>{t('diff.explain', '解释改动')}</span>
+              </button>
+            )}
             <button
               className={`ct-btn ghost ${diffSideBySide ? 'active' : ''}`}
               onClick={() => setDiffSideBySide(!diffSideBySide)}
@@ -617,6 +635,57 @@ export function DiffView() {
           </div>
         )}
       </div>
+      {diffExplainOpen && (() => {
+        const hasText = !!diffExplanation?.text
+        // Label reflects what's being explained: a single file, or — when the
+        // explanation key is the all-unstaged sentinel — the whole changeset.
+        const isAll = diffExplanation?.key === '__all_unstaged__'
+        const scopeLabel = isAll
+          ? t('diff.explain_all_unstaged', '全部未暂存改动')
+          : (selectedFile ?? t('diff.explain_all', '全部改动'))
+        return (
+          <div className="modal-overlay" onClick={() => setDiffExplainOpen(false)}>
+            <div className="modal modal-wide commit-explain-modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-title">
+                <i className="ti ti-sparkles" style={{ marginRight: 6 }} />
+                {t('diff.explain_title', 'AI 解释改动')}
+              </div>
+              <div className="modal-body">
+                <div className="modal-commit-preview">
+                  <span className="modal-commit-msg">{scopeLabel}</span>
+                </div>
+                {hasText ? (
+                  <div
+                    className="ai-markdown"
+                    dangerouslySetInnerHTML={{
+                      __html: renderLiteMarkdown(diffExplanation!.text + (diffExplanationLoading ? ' ▌' : '')),
+                    }}
+                  />
+                ) : (
+                  <div className="rs-loading">
+                    <i className="ti ti-loader-2" />
+                    <span>{t('rightsidebar.explain_thinking')}</span>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                {!diffExplanationLoading && hasText && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => explainWorkingDiff(isAll ? null : selectedFile)}
+                  >
+                    <i className="ti ti-refresh" />
+                    {t('rightsidebar.explain_regenerate')}
+                  </button>
+                )}
+                <button className="btn-secondary" onClick={() => setDiffExplainOpen(false)}>
+                  {t('common.close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {blameOpen && selectedFile && (
         <BlameModal
           file={selectedFile}

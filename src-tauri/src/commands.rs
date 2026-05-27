@@ -3217,11 +3217,12 @@ pub async fn ai_analyze_merge_risk(
 const AI_FILE_CONFLICT_SYSTEM_PROMPT: &str = r#"你是资深工程师。用户即将合并分支，下面是某个文件在双方分支上的具体改动。
 请只针对这一个文件，找出具体冲突点。要求：
 
-- 一段中文，约 100-200 字
+- 用 Markdown 格式输出：**加粗** 关键结论、`反引号` 包裹函数名/行号、需要时用「- 」列表
+- 约 100-200 字中文
 - 指出哪几行/哪个函数双方都改了，为什么会冲突
 - 如果其实不冲突（改动在不同位置），明确说"实际不冲突，git 应该能自动合并"
 - 给出推荐的处理思路（用我的、用对方的、合并两边等）
-- 不要复述 diff 全文"#;
+- 不要复述 diff 全文，不要用代码块（```）包裹整段回复"#;
 
 #[tauri::command]
 pub async fn ai_analyze_file_conflict(
@@ -4014,13 +4015,14 @@ async fn call_openai_compatible(
 }
 
 const AI_EXPLAIN_SYSTEM_PROMPT: &str =
-    "你是资深工程师，向不熟悉这个项目的同事用人话解释一次 git 提交真正干了什么。要求：\n\
-     - 2-3 句中文。先说改了什么，可能的话再点一下为什么\n\
-     - 不要复述 commit message 字面意思，要从 diff 看到「作者实际做的事」\n\
-     - 如果是典型类别（bug 修复 / 重构 / 新功能 / 配置调整 / 依赖升级 / 测试 / 文档），先把类别标出来\n\
-     - 改动跨多文件时归纳主线，不要逐文件列举\n\
-     - 不要写「该提交」「本次提交」这样的废话，直接说事\n\
-     - 不要用代码块包裹，不要用列表，纯一段文字";
+    "你是资深工程师，向不熟悉这个项目的同事用人话解释这次改动真正干了什么。要求：\n\
+     - 用 Markdown 格式输出，便于阅读：**加粗** 关键点、`反引号` 包裹文件名/函数名/变量、需要时用「- 」列表\n\
+     - 第一行先用 **类别：xxx** 标出改动类型（bug 修复 / 重构 / 新功能 / 配置调整 / 依赖升级 / 测试 / 文档，可组合）\n\
+     - 然后 2-4 句说清改了什么、可能的话点一下为什么；改动跨多文件时归纳主线，不要逐文件罗列\n\
+     - 从 diff 看「实际做的事」，不要复述 commit message 字面意思\n\
+     - 不要写「该提交」「本次改动」这类废话，直接说事\n\
+     - 不要用代码块（```）包裹整段回复\n\
+     - 中文输出";
 
 #[tauri::command]
 pub async fn ai_explain_commit(
@@ -4641,6 +4643,13 @@ pub struct SearchHit {
     pub line: u32,
     pub column: u32,
     pub content: String,
+    /// True when this hit matched the file's NAME/path (not its content).
+    /// Such hits carry line/column 0 and empty content; the UI renders them
+    /// as a "matches filename" row so a query that only appears in a path
+    /// (e.g. searching "stepwise" for `loom-stepwise-proposal.md`) still
+    /// surfaces the file.
+    #[serde(default)]
+    pub filename_match: bool,
 }
 
 /// Cross-file content search via `git grep`. Reasons we shell out:
@@ -4673,6 +4682,12 @@ pub async fn grep_repo(
         // `--null` (-z) NUL-separate fields so paths with `:` survive.
         "-n".into(), "--column".into(), "-I".into(), "--null".into(),
         "--no-color".into(),
+        // Also search untracked files (newly-created, not yet `git add`ed).
+        // Default `git grep` only scans tracked files, so a brand-new file
+        // would silently return no matches — confusing when the user can
+        // plainly see it on disk. `--untracked` still honors `.gitignore`
+        // (ignored files stay excluded), so build junk doesn't leak in.
+        "--untracked".into(),
         // Cap matches per file so one huge file can't drown the others.
         "--max-count=50".into(),
     ];
@@ -4698,17 +4713,19 @@ pub async fn grep_repo(
         .await
         .map_err(fe)?;
 
-    // Exit code 1 = no matches (not an error). Exit code 128 = real error.
-    if !out.status.success() {
+    // Exit code 1 = no CONTENT matches (not an error) — but we must still
+    // fall through to the filename-matching pass below, since the query may
+    // only appear in a path. Exit code 128 = real error. Previously this
+    // returned Ok(empty) on code 1, short-circuiting filename search.
+    let no_content_matches = out.status.code() == Some(1);
+    if !out.status.success() && !no_content_matches {
         let code = out.status.code().unwrap_or(0);
-        if code == 1 {
-            return Ok(Vec::new())
-        }
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(if stderr.is_empty() { format!("git grep failed (code {})", code) } else { stderr });
     }
 
     // Output format with --null: <path>\0<line>\0<col>\0<content>\n
+    // (Empty when there were no content matches; the loop just no-ops.)
     let mut hits: Vec<SearchHit> = Vec::new();
     for raw_line in out.stdout.split(|b| *b == b'\n') {
         if raw_line.is_empty() { continue }
@@ -4735,9 +4752,50 @@ pub async fn grep_repo(
             line: line_n,
             column: col_n,
             content,
+            filename_match: false,
         });
         if hits.len() >= MAX_RESULTS { break }
     }
+
+    // Filename matches: surface files whose PATH contains the query, even if
+    // the term never appears in their content (e.g. searching "stepwise" for
+    // `docs/loom-stepwise-proposal.md`). Content search alone misses these.
+    // Substring match (case rule honored); regex mode falls back to substring
+    // here — regex-on-paths is a rare need and substring covers the intent.
+    // We list tracked + untracked-non-ignored paths so new files count too.
+    if hits.len() < MAX_RESULTS {
+        let needle = if case_sensitive.unwrap_or(false) { query.clone() } else { query.to_lowercase() };
+        let already: std::collections::HashSet<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+        let mut name_hits: Vec<SearchHit> = Vec::new();
+        if let Ok(ls) = tokio::process::Command::new("git")
+            .args(["--no-optional-locks", "ls-files", "--cached", "--others", "--exclude-standard", "-z"])
+            .current_dir(&path)
+            .output()
+            .await
+        {
+            if ls.status.success() {
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for raw in ls.stdout.split(|b| *b == 0) {
+                    if raw.is_empty() { continue }
+                    let p = String::from_utf8_lossy(raw).into_owned();
+                    if already.contains(p.as_str()) { continue }   // already a content hit
+                    if !seen.insert(p.clone()) { continue }          // dedup (ls-files can repeat)
+                    let hay = if case_sensitive.unwrap_or(false) { p.clone() } else { p.to_lowercase() };
+                    if hay.contains(&needle) {
+                        name_hits.push(SearchHit {
+                            file: p, line: 0, column: 0, content: String::new(), filename_match: true,
+                        });
+                    }
+                }
+            }
+        }
+        // Prepend filename matches so "I searched a path" feels responsive,
+        // then trim the combined list to the cap.
+        name_hits.extend(hits);
+        hits = name_hits;
+        hits.truncate(MAX_RESULTS);
+    }
+
     Ok(hits)
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore, type MergeAnalysis, type MergeRiskReport, type FileRisk } from '../../store'
+import { renderLiteMarkdown } from '../../lib/lite-markdown'
 
 interface Props {
   target: string
@@ -135,7 +136,10 @@ export function MergeModal({ target, onClose }: Props) {
                   <span>{t('merge.ai_analyzing_both')}</span>
                 </div>
               ) : aiReport ? (
-                <p className="merge-ai-text">{aiReport.overall}</p>
+                <div
+                  className="merge-ai-text ai-markdown"
+                  dangerouslySetInnerHTML={{ __html: renderLiteMarkdown(aiReport.overall) }}
+                />
               ) : (
                 <button
                   className="commit-explain-btn"
@@ -264,10 +268,10 @@ function AnalysisContent({
                   {isExpanded && (
                     <div className="merge-file-detail">
                       {text ? (
-                        <p className="merge-file-detail-text">
-                          {text}
-                          {isLoading && <span className="ai-streaming-cursor">▌</span>}
-                        </p>
+                        <div
+                          className="merge-file-detail-text ai-markdown"
+                          dangerouslySetInnerHTML={{ __html: renderLiteMarkdown(text + (isLoading ? ' ▌' : '')) }}
+                        />
                       ) : isLoading ? (
                         <div className="merge-ai-loading">
                           <i className="ti ti-loader-2" />

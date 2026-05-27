@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { listen } from '@tauri-apps/api/event'
-import { useStore } from './store'
+import { useStore, sortTabsForDisplay } from './store'
 import { Sidebar } from './components/Sidebar'
 import { DiffView } from './components/Diff'
 import { Terminal } from './components/Terminal'
@@ -133,9 +133,13 @@ export default function App() {
       // for future per-pane shortcuts.
       if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
         const n = Number(e.key) - 1
-        if (n < s.tabs.length) {
+        // Index into the SAME starred-first order the sidebar displays, not
+        // the raw tabs array — otherwise ⌘2 lands on a different repo than
+        // the 2nd row once anything is starred.
+        const ordered = sortTabsForDisplay(s.tabs, s.starredRepos)
+        if (n < ordered.length) {
           e.preventDefault()
-          s.switchTab(s.tabs[n].root)
+          s.switchTab(ordered[n].root)
         }
         return
       }

@@ -54,6 +54,8 @@ export function UnstagedGroups({
   const { groups, assignments, activeId, createGroup, deleteGroup, setActive, moveFiles } =
     useChangelistStore()
   const repoPath = useStore(s => s.repoPath)
+  const explainWorkingDiff = useStore(s => s.explainWorkingDiff)
+  const setDiffExplainOpen = useStore(s => s.setDiffExplainOpen)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -205,6 +207,24 @@ export function UnstagedGroups({
                   style={{ padding: '0 4px' }}
                 >
                   <i className="ti ti-star" />
+                </button>
+              )}
+              {g.isDefault && unstagedFiles.length > 0 && (
+                <button
+                  type="button"
+                  className="file-action-btn"
+                  title={t('diff.explain_tooltip', '用 AI 解释这些改动')}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    // Explain ALL unstaged changes (null = whole changeset),
+                    // not just this default group. Opens the same modal the
+                    // DiffView hosts.
+                    setDiffExplainOpen(true)
+                    explainWorkingDiff(null)
+                  }}
+                  style={{ padding: '0 4px' }}
+                >
+                  <i className="ti ti-sparkles" />
                 </button>
               )}
               {g.isDefault ? (

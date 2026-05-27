@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore, type CommitInfo, type GraphCommit } from '../../store'
 import { RebaseModal } from '../Rebase'
 import { relTime } from '../../lib/relTime'
+import { renderLiteMarkdown } from '../../lib/lite-markdown'
 
 const ROW_H = 36
 const LANE_W_MAX = 22
@@ -631,10 +632,12 @@ export function GraphView() {
                   <span className="modal-commit-msg">{explainTarget.message}</span>
                 </div>
                 {hasText ? (
-                  <p className="commit-explain-text">
-                    {commitExplanation!.text}
-                    {commitExplanationLoading && <span className="ai-streaming-cursor">▌</span>}
-                  </p>
+                  <div
+                    className="ai-markdown"
+                    dangerouslySetInnerHTML={{
+                      __html: renderLiteMarkdown(commitExplanation!.text + (commitExplanationLoading ? ' ▌' : '')),
+                    }}
+                  />
                 ) : (
                   <div className="rs-loading">
                     <i className="ti ti-loader-2" />
