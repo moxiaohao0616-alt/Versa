@@ -1,23 +1,25 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <!-- Versa macOS-style app icon — light variant.
-       macOS Big Sur+ requires the squircle (continuous-corner rounded
-       rectangle) to be baked into the icon itself — the OS does NOT mask.
-       rx=229 (≈22.4% of 1024) approximates Apple's icon-template radius.
-       The V mark is inset to ~70% of the canvas, giving comfortable
-       padding from the rounded corners. -->
+       macOS Big Sur+ template: 1024×1024 canvas, but the visible squircle
+       "tile" is INSET 100px on each side (824×824) with corner radius 185.
+       The transparent gutter is what every other Dock icon also has — a
+       tile that fills the whole 1024 reads visibly larger than its
+       neighbors.
+       The V mark is scaled by 824/1024 ≈ 0.805 and offset by 100 so it
+       sits centered inside the squircle with comfortable padding. -->
 
-  <!-- White tile -->
-  <rect width="1024" height="1024" rx="229" ry="229" fill="#ffffff" />
+  <!-- Squircle tile -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#ffffff" />
 
   <!-- Left branch — Versa green -->
-  <path d="M 308 304 L 512 750"
-        stroke="#639922" stroke-width="100"
+  <path d="M 348 345 L 512 704"
+        stroke="#639922" stroke-width="80"
         stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  <circle cx="308" cy="304" r="80" fill="#639922" />
+  <circle cx="348" cy="345" r="64" fill="#639922" />
 
   <!-- Right branch — neutral dark -->
-  <path d="M 716 304 L 512 750"
-        stroke="#1a1a18" stroke-width="100"
+  <path d="M 676 345 L 512 704"
+        stroke="#1a1a18" stroke-width="80"
         stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  <circle cx="716" cy="304" r="80" fill="#1a1a18" />
+  <circle cx="676" cy="345" r="64" fill="#1a1a18" />
 </svg>
