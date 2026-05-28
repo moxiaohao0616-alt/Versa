@@ -147,6 +147,7 @@ export function GraphView() {
     loadGraph, loadMoreGraph, loadAllGraph, setGraphSelected, locateCommit,
     startBisect, aiSuggestBisectGood, showToast,
     explainSelectedCommit,
+    branches, loadBranches, graphBranch, setGraphBranch,
   } = useStore()
   // Subscribe reactively so the explain modal updates as the AI streams.
   const commitExplanation = useStore(s => s.commitExplanation)
@@ -291,6 +292,9 @@ export function GraphView() {
     if (!repoPath) return
     loadGraph()
   }, [repoPath, repoStatus])
+
+  // Load branches once for the toolbar's branch-filter dropdown.
+  useEffect(() => { if (repoPath) loadBranches() }, [repoPath])
 
   // hasMore = backend filled the requested window exactly → may be more.
   const hasMore = commits.length === limit
@@ -461,6 +465,31 @@ export function GraphView() {
             </button>
           )}
         </div>
+        {/* Branch filter — restricts the revwalk to one branch's history
+            (server-side, via get_graph's `branch` arg). All-branches keeps
+            the cross-branch graph; picking a branch is `git log <branch>`. */}
+        <select
+          className="graph-filter-select"
+          value={graphBranch ?? ''}
+          onChange={e => setGraphBranch(e.target.value || null)}
+          title={t('graph.branch_filter_tooltip', '只看某个分支的提交')}
+        >
+          <option value="">{t('graph.branch_all', '所有分支')}</option>
+          {branches.filter(b => !b.isRemote).length > 0 && (
+            <optgroup label={t('graph.branch_local', '本地')}>
+              {branches.filter(b => !b.isRemote).map(b =>
+                <option key={`l-${b.name}`} value={b.name}>{b.name}</option>
+              )}
+            </optgroup>
+          )}
+          {branches.filter(b => b.isRemote).length > 0 && (
+            <optgroup label={t('graph.branch_remote', '远端')}>
+              {branches.filter(b => b.isRemote).map(b =>
+                <option key={`r-${b.name}`} value={b.name}>{b.name}</option>
+              )}
+            </optgroup>
+          )}
+        </select>
         <select
           className="graph-filter-select"
           value={filterAuthor}

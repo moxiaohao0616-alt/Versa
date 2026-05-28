@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useStore, diffsToUnifiedText, type DiffHunk, type DiffLine, type CommitInfo, type BranchInfo } from '../../store'
 import { relTime } from '../../lib/relTime'
 import { AIPrDescriptionModal } from '../AIPrDescription'
+import { SideBySideDiff } from '../Diff/SideBySide'
 
 type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'typechange'
 
@@ -170,6 +171,10 @@ function buildDualTree(entries: CompareTreeEntry[]): DualNode {
 export function CompareView() {
   const { t } = useTranslation()
   const { repoPath, branches, loadBranches, repoStatus, showToast } = useStore()
+  // Reuse the global side-by-side preference so the toggle is consistent
+  // with the Changes diff view (one setting, applies everywhere).
+  const diffSideBySide = useStore(s => s.diffSideBySide)
+  const setDiffSideBySide = useStore(s => s.setDiffSideBySide)
 
   const [base, setBase] = useState('')
   const [head, setHead] = useState('')
@@ -457,6 +462,16 @@ export function CompareView() {
                     <span className="removed">−{selectedFile.removed}</span>
                   </span>
                 )}
+                {selectedFile && selectedFile.hunks.length > 0 && (
+                  <button
+                    className={`compare-diff-sbs${diffSideBySide ? ' active' : ''}`}
+                    onClick={() => setDiffSideBySide(!diffSideBySide)}
+                    title={t('diff.side_by_side_tooltip')}
+                  >
+                    <i className="ti ti-columns" />
+                    <span>{t('diff.side_by_side')}</span>
+                  </button>
+                )}
                 <button
                   className="compare-diff-close"
                   onClick={() => setSelected(null)}
@@ -471,6 +486,13 @@ export function CompareView() {
                     <div className="empty-state center" style={{ padding: 24 }}>
                       <p style={{ fontSize: 12 }}>(no hunks — binary or empty change)</p>
                     </div>
+                  ) : diffSideBySide ? (
+                    // Reuse the Changes view's side-by-side renderer; wrap the
+                    // CompareFile into the DiffResult shape it expects.
+                    <SideBySideDiff
+                      diff={[{ file: selectedFile.path, hunks: selectedFile.hunks }]}
+                      showFileHeaders={false}
+                    />
                   ) : selectedFile.hunks.map((h, hi) => (
                     <div key={hi} className="compare-hunk">
                       <div className="compare-hunk-head">{h.header}</div>

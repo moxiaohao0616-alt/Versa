@@ -2814,13 +2814,16 @@ pub fn compare_branches(
     let base_oid = repo.revparse_single(&base).map_err(fe)?.id();
     let head_oid = repo.revparse_single(&head).map_err(fe)?.id();
 
-    // Three-dot diff convention: compare base's merge-base with head
-    // against head's tree. This shows only what head added — the same
-    // diff GitHub shows on a PR page.
+    // TWO-DOT diff: base tip's tree vs head tip's tree. This MUST match the
+    // file-tree view (compare_trees, also two-dot) so every file the tree
+    // marks as differing has a viewable diff here. Previously this used a
+    // three-dot (merge-base → head) "PR diff", which silently dropped files
+    // changed only on the base side — clicking such a file (or the auto-
+    // selected first diff after picking a diverged base) showed a blank
+    // panel. merge_base is still computed below for the `mergeBase` field.
     let mb = repo.merge_base(base_oid, head_oid).ok();
-    let diff_from = mb.unwrap_or(base_oid);
 
-    let from_tree = repo.find_commit(diff_from).map_err(fe)?.tree().map_err(fe)?;
+    let from_tree = repo.find_commit(base_oid).map_err(fe)?.tree().map_err(fe)?;
     let head_tree = repo.find_commit(head_oid).map_err(fe)?.tree().map_err(fe)?;
 
     // ── Commit list: revwalk(head) excluding base
@@ -3368,7 +3371,7 @@ pub struct GraphCommit {
 }
 
 #[tauri::command]
-pub fn get_graph(path: String, limit: usize) -> Result<Vec<GraphCommit>, String> {
+pub fn get_graph(path: String, limit: usize, branch: Option<String>) -> Result<Vec<GraphCommit>, String> {
     let repo = Repository::open(&path).map_err(fe)?;
 
     // Build id → ref names map
@@ -3411,8 +3414,25 @@ pub fn get_graph(path: String, limit: usize) -> Result<Vec<GraphCommit>, String>
     let mut revwalk = repo.revwalk().map_err(fe)?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
         .map_err(fe)?;
-    let _ = revwalk.push_glob("refs/heads/*");
-    let _ = revwalk.push_head();
+    // Branch filter: when a specific branch name is passed, walk only from
+    // that tip — same semantics as `git log <branch>`. Falls back to "all
+    // local branches + HEAD" (the default cross-branch graph) when unset
+    // or the name doesn't resolve.
+    let did_filter = match branch.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(name) => {
+            match repo.revparse_single(name)
+                .and_then(|obj| obj.peel_to_commit())
+            {
+                Ok(c) => { let _ = revwalk.push(c.id()); true }
+                Err(_) => false,
+            }
+        }
+        None => false,
+    };
+    if !did_filter {
+        let _ = revwalk.push_glob("refs/heads/*");
+        let _ = revwalk.push_head();
+    }
 
     let commits = revwalk
         .take(limit)

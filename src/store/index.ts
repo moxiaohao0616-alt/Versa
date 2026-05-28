@@ -886,6 +886,10 @@ interface VersaState {
   graphLimit: number
   graphLoading: boolean
   graphSelected: string | null
+  /** Branch filter for the History graph. null = all branches (current
+   *  cross-branch view); a branch name = only commits reachable from
+   *  that tip (same as `git log <branch>`). */
+  graphBranch: string | null
 
   // Bisect state — refreshed when state machine reports 'bisecting'
   bisectStatus: BisectStatus | null
@@ -1062,6 +1066,10 @@ interface VersaState {
   loadMoreGraph: () => Promise<void>
   loadAllGraph: () => Promise<void>
   setGraphSelected: (id: string | null) => void
+  /** Set the branch filter for History (null = show all branches). Resets
+   *  graphLimit so a freshly-filtered view starts at the default window
+   *  and triggers a fresh load. */
+  setGraphBranch: (branch: string | null) => void
   setGraphLoadStep: (n: number) => void
   toggleRightSidebar: () => void
 
@@ -1175,6 +1183,7 @@ export const useStore = create<VersaState>((set, get) => ({
   graphLimit: 200,
   graphLoading: false,
   graphSelected: null,
+  graphBranch: null,
   graphLoadStep: Number(localStorage.getItem('versa:graphLoadStep') || 200),
   rightPanel: {
     open: localStorage.getItem('versa:rightPanel:open') === '1',
@@ -2531,11 +2540,11 @@ export const useStore = create<VersaState>((set, get) => ({
   consumeTerminalCommand: () => set({ pendingTerminalCommand: null }),
 
   loadGraph: async () => {
-    const { repoPath, graphLimit } = get()
+    const { repoPath, graphLimit, graphBranch } = get()
     if (!repoPath) return
     set({ graphLoading: true })
     try {
-      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: graphLimit })
+      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: graphLimit, branch: graphBranch })
       set({ graphCommits: data })
     } catch (e) {
       set({ error: String(e) })
@@ -2545,12 +2554,12 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   loadMoreGraph: async () => {
-    const { graphLimit, graphLoadStep, repoPath } = get()
+    const { graphLimit, graphLoadStep, repoPath, graphBranch } = get()
     if (!repoPath) return
     const next = graphLimit + Math.max(1, graphLoadStep)
     set({ graphLimit: next, graphLoading: true })
     try {
-      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: next })
+      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: next, branch: graphBranch })
       set({ graphCommits: data })
     } catch (e) {
       set({ error: String(e) })
@@ -2560,13 +2569,13 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   loadAllGraph: async () => {
-    const { repoPath } = get()
+    const { repoPath, graphBranch } = get()
     if (!repoPath) return
     set({ graphLoading: true })
     try {
       // Large limit — git2 revwalk stops naturally at the root.
       const HUGE = 1_000_000
-      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: HUGE })
+      const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: HUGE, branch: graphBranch })
       set({ graphCommits: data, graphLimit: data.length })
     } catch (e) {
       set({ error: String(e) })
@@ -2576,6 +2585,14 @@ export const useStore = create<VersaState>((set, get) => ({
   },
 
   setGraphSelected: (id) => set({ graphSelected: id }),
+  setGraphBranch: (branch) => {
+    // Reset the window so the new filter starts fresh (avoids inheriting a
+    // huge limit from a previous "load all" on the cross-branch view), then
+    // refetch. Selection is cleared because the prior commit may not be in
+    // the filtered branch's history.
+    set({ graphBranch: branch, graphLimit: 200, graphSelected: null })
+    get().loadGraph()
+  },
 
   setGraphLoadStep: (n) => {
     const v = Math.max(50, Math.min(2000, Math.floor(n) || 200))
@@ -2900,7 +2917,7 @@ export const useStore = create<VersaState>((set, get) => ({
       if (target > get().graphLimit) {
         set({ graphLimit: target, graphLoading: true })
         try {
-          const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: target })
+          const data = await invoke<GraphCommit[]>('get_graph', { path: repoPath, limit: target, branch: get().graphBranch })
           set({ graphCommits: data })
         } finally {
           set({ graphLoading: false })
