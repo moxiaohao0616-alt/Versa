@@ -94,6 +94,36 @@ can't say — never trapped.
 
 ---
 
+## What's stable vs experimental
+
+Versa is still pre-1.0 — here's what to trust as a first-time user.
+
+**Stable** — common paths are well-tested; treat these as production-ready:
+
+- File / hunk staging · commit · push · pull · fetch
+- Branch list / create / switch / delete / rename / tag lifecycle · stash
+- History view (graph + per-commit kebab) · commit detail (files + diff) · file & block history
+- Diff viewer (unified + synced side-by-side · word-level · ignore whitespace)
+- Multi-tab xterm at repo root · multi-repo workspaces (`⌘P`, drag-reorder, `⌘1-9`)
+- Global content search (`⌘⇧F`, matches contents + filenames + untracked files)
+- Open / `git init` any folder with a batteries-included `.gitignore`
+- Bilingual UI
+
+**Experimental** — works, but rough edges or recent additions:
+
+- 3-way merge / rebase / revert / cherry-pick editor (handles the common cases; weird whitespace / encoding may surprise)
+- Interactive rebase drag-and-drop (use the reflog if you regret a step)
+- Bisect with AI-suggested starting commit (heuristic — verify the result)
+- AI features (commit message · explain · review · conflict · PR draft) — quality varies per provider; markdown output still being tuned
+- Reflog "Time Machine" — undo is reliable; advanced restore scenarios are best-effort
+- Changelists — the parking-lot scoping works; edge cases when files move between groups
+- Versa Cloud sign-in — client ships, backend not yet deployed
+- Branch filter on History · drag-reorder repos · pre-commit AI explain (all very recent)
+
+First-time users: stay on the **Stable** list. The Experimental items still ship working code, just with a higher "huh, that's weird" rate.
+
+---
+
 ## Install
 
 ### Pre-built binaries
