@@ -32,39 +32,68 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO = "moxiaohao0616-alt/Versa"
 
 PLATFORM_MATCHERS = [
     # (suffix to match on asset name, tauri target identifier)
-    (".app.tar.gz",       "darwin-aarch64"),
-    (".AppImage",         "linux-x86_64"),
-    ("-setup.nsis.zip",   "windows-x86_64"),
+    # Tauri's per-platform updater archive shapes:
+    #   macOS   →  *.app.tar.gz   (a tar of the .app)
+    #   Linux   →  *.AppImage     (the AppImage itself; updater swaps it in place)
+    #   Windows →  *-setup.exe    (NSIS installer; updater runs it silently)
+    # Each ships a sibling `.sig` we read into the manifest.
+    (".app.tar.gz",   "darwin-aarch64"),
+    (".AppImage",     "linux-x86_64"),
+    ("-setup.exe",    "windows-x86_64"),
 ]
 
 
+def _retry(fn, attempts=5, delay=3.0):
+    """Run fn() up to `attempts` times, sleeping `delay`s between failures.
+    GitHub's api.github.com regularly hiccups with TLS handshake timeouts
+    and unexpected EOFs; a small retry loop hides them. Raises the last
+    exception if all attempts fail."""
+    last = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except subprocess.CalledProcessError as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise last
+
+
 def gh_assets(tag: str) -> list[str]:
-    out = subprocess.check_output(
-        ["gh", "release", "view", tag, "--repo", REPO,
-         "--json", "assets", "--jq", ".assets[].name"],
-        text=True,
-    )
+    def call():
+        return subprocess.check_output(
+            ["gh", "release", "view", tag, "--repo", REPO,
+             "--json", "assets", "--jq", ".assets[].name"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+    out = _retry(call)
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def gh_download(tag: str, pattern: str, into: Path) -> None:
-    subprocess.check_call(
-        ["gh", "release", "download", tag, "--repo", REPO,
-         "--pattern", pattern, "--dir", str(into), "--clobber"],
-    )
+    def call():
+        return subprocess.check_call(
+            ["gh", "release", "download", tag, "--repo", REPO,
+             "--pattern", pattern, "--dir", str(into), "--clobber"],
+        )
+    _retry(call)
 
 
 def gh_upload(tag: str, path: Path) -> None:
-    subprocess.check_call(
-        ["gh", "release", "upload", tag, str(path),
-         "--repo", REPO, "--clobber"],
-    )
+    def call():
+        return subprocess.check_call(
+            ["gh", "release", "upload", tag, str(path),
+             "--repo", REPO, "--clobber"],
+        )
+    _retry(call)
 
 
 def main() -> int:
